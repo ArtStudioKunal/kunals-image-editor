@@ -1,0 +1,51 @@
+name: Build Kunal's Image & Vector Suite (Windows)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  windows-suite:
+    runs-on: windows-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Check out Kunal's Image Editor
+        uses: actions/checkout@v4
+        with:
+          path: image-editor
+      - name: Check out VectorCraft source
+        uses: actions/checkout@v4
+        with:
+          repository: storytold/vectorcraft
+          ref: main
+          path: vectorcraft
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: '1.95.0'
+      - name: Build image editor
+        working-directory: image-editor
+        shell: pwsh
+        run: cargo build --release --locked -p photocraft
+      - name: Build vector editor
+        working-directory: vectorcraft
+        shell: pwsh
+        run: cargo build --release --locked -p vectorcraft
+      - name: Package both editors and launcher
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path output | Out-Null
+          Copy-Item image-editor/target/release/photocraft.exe output/KunalsImageEditor.exe
+          Copy-Item vectorcraft/target/release/vectorcraft.exe output/VectorEditor.exe
+          Copy-Item image-editor/integration/windows/KunalsCreativeSuite.cmd output/KunalsCreativeSuite.cmd
+          New-Item -ItemType Directory -Force -Path output/licenses/image-editor,output/licenses/vectorcraft | Out-Null
+          Copy-Item image-editor/LICENSE-MIT,image-editor/LICENSE-APACHE,image-editor/NOTICE,image-editor/ATTRIBUTION.md output/licenses/image-editor/
+          Copy-Item vectorcraft/LICENSE-MIT,vectorcraft/LICENSE-APACHE output/licenses/vectorcraft/
+          if (Test-Path vectorcraft/NOTICE) { Copy-Item vectorcraft/NOTICE output/licenses/vectorcraft/ }
+          if (Test-Path vectorcraft/ATTRIBUTION.md) { Copy-Item vectorcraft/ATTRIBUTION.md output/licenses/vectorcraft/ }
+      - name: Upload combined Windows bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: Kunals-Creative-Suite-Windows-x64
+          path: output/
+          if-no-files-found: error
