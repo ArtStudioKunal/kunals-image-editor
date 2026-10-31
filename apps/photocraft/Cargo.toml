@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 default-run = "photocraft"
-description = "Kunal\'s Image Editor: a native image editor based on PhotoCraft"
+description = "Kunal's Image Editor: a native image editor based on PhotoCraft"
 build = "build.rs"
 
 [features]
