@@ -11,7 +11,7 @@
   <img src="assets/app-icon/hicolor/256x256/apps/ai.storyteller.photocraft.png" width="128" height="128" alt="PhotoCraft icon: an engraved nine-tailed fox on a blue tile">
 </p>
 
-<h1 align="center">PhotoCraft</h1>
+<h1 align="center">Kunal\'s Image Editor</h1>\n\n<p align="center">Personalized fork of <a href="https://github.com/storytold/photocraft">PhotoCraft</a>. Original authors and licenses are retained.</p>
 
 <p align="center">
   <b>Image editing; an open-source, clean-room reimplementation of Adobe Photoshop, rebuilt in pure Rust.</b><br>
