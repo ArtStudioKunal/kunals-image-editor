@@ -21,8 +21,8 @@ fn main() {
     }
     let mut res = winresource::WindowsResource::new();
     res.set_icon("../../assets/app-icon/photocraft.ico")
-        .set("ProductName", "Kunal\'s Image Editor")
-        .set("FileDescription", "Kunal\'s Image Editor")
+        .set("ProductName", "Kunal's Image Editor")
+        .set("FileDescription", "Kunal's Image Editor")
         .set("CompanyName", "Learning Machines LLC")
         .set("LegalCopyright", "Copyright (c) the PhotoCraft authors. MIT OR Apache-2.0.")
         .set("OriginalFilename", "KunalsImageEditor.exe")
