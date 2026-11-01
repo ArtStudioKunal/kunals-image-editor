@@ -42,6 +42,48 @@ pub fn page_key(key: Key, mods: Modifiers, size: Vec2) -> Option<PageKey> {
 
 /// Consumes this frame's page keys and moves the active document's view. True when one ran.
 pub fn handle(app: &mut PhotocraftApp, ctx: &egui::Context) -> bool {
+    // Multipage: Page Up/Down insert a persistent artboard page instead of
+    // scrolling the raster canvas. Other workspaces keep existing shortcuts.
+    if app.ui.workspace == "Multipage" && app.session.active().is_some() {
+        let direction = ctx.input_mut(|input| {
+            let mut direction = None;
+            input.events.retain(|event| {
+                if let Event::Key { key, pressed: true, modifiers, .. } = event {
+                    if !modifiers.alt && !modifiers.ctrl && !modifiers.command && !modifiers.shift
+                        && matches!(key, Key::PageUp | Key::PageDown)
+                    {
+                        direction = Some(*key);
+                        return false;
+                    }
+                }
+                true
+            });
+            direction
+        });
+        if let Some(key) = direction {
+            let doc = &app.session.active().expect("checked above").doc;
+            let width = doc.artboards().first().map_or(doc.size.width, |(_, _, board)| board.rect.width() as u32);
+            let height = doc.artboards().first().map_or(doc.size.height, |(_, _, board)| board.rect.height() as u32);
+            let left = doc.artboards().iter().map(|(_, _, b)| b.rect.x0).min().unwrap_or(0);
+            let right = doc.artboards().iter().map(|(_, _, b)| b.rect.x1).max().unwrap_or(0);
+            let y = doc.artboards().iter().map(|(_, _, b)| b.rect.y0).min().unwrap_or(0);
+            let x = if key == Key::PageUp {
+                i64::from(left) - i64::from(width) - 100
+            } else {
+                i64::from(right) + 100
+            };
+            let rect = [x, i64::from(y), i64::from(width), i64::from(height)];
+            if x >= i64::from(i32::MIN) && x + i64::from(width) <= i64::from(i32::MAX) {
+                if let Err(err) = app.run("layer.new.artboard", serde_json::json!({"rect": rect, "background": "white"})) {
+                    app.ui.status = err.to_string();
+                }
+            } else {
+                app.ui.status = "No room for another page at this coordinate".into();
+            }
+            ctx.request_repaint();
+            return true;
+        }
+    }
     let Some(i) = app.session.active_index() else { return false };
     let rect = crate::rulers::content_rect(app, app.last_canvas_rect);
     let size = rect.size();
