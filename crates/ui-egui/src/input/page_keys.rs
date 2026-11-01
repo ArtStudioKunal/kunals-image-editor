@@ -49,7 +49,11 @@ pub fn handle(app: &mut PhotocraftApp, ctx: &egui::Context) -> bool {
             let mut direction = None;
             input.events.retain(|event| {
                 if let Event::Key { key, pressed: true, modifiers, .. } = event
-                    && !modifiers.alt && !modifiers.ctrl && !modifiers.command && !modifiers.shift && matches!(key, Key::PageUp | Key::PageDown)
+                    && !modifiers.alt
+                    && !modifiers.ctrl
+                    && !modifiers.command
+                    && !modifiers.shift
+                    && matches!(key, Key::PageUp | Key::PageDown)
                 {
                     direction = Some(*key);
                     return false;
