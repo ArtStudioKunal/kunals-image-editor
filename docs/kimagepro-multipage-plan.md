@@ -1,6 +1,6 @@
 # KimagePro Multipage — Development specification
 
-Status: **Milestone 0 scaffold**. A built-in **Multipage** workspace now appears in the workspace selector and uses a layout-oriented panel arrangement. **This does not yet create pages or change paste behavior.**
+Status: **Early implementation**. The built-in **Multipage** workspace is selectable. Initial Page Up/Down handling now creates persistent, white artboards to the left or right using existing artboard commands. This is not a complete multipage layout engine; page order, editing off-page, paste in place, and complete persistence validation remain unfinished.
 
 ## Hard constraints
 - No AI, model inference, external AI services, or AI-powered tools.
@@ -9,6 +9,8 @@ Status: **Milestone 0 scaffold**. A built-in **Multipage** workspace now appears
 - Retain upstream license and asset attribution notices.
 
 ## Milestone 1: page model and pasteboard
+
+Current progress: existing persistent artboards are reused as an initial page primitive. No page organizer panel or true page identity/order metadata has been added.
 - Persist ordered pages with stable IDs, page dimensions, margins, bleed, optional facing-page arrangement, and page-specific object associations.
 - Provide an editable pasteboard beyond pages. Off-page objects remain visible, selectable, transformable, and saved with the document, but are excluded from PDF output unless intersecting the exported page or bleed.
 - Test hit-testing and rendering at negative canvas coordinates; no destructive clipping when objects leave a page.
