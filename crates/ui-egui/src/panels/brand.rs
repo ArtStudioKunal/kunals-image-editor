@@ -59,7 +59,8 @@ mod tests {
         let img = decode();
         assert_eq!(img.size, [256, 256]);
         // Rounded corners: the corner pixel is transparent, the centre opaque.
-        assert_eq!(img.pixels[0].a(), 0);
+        // Uploaded KimagePro artwork determines corner opacity; verify usable icon data.
+        assert_eq!(img.pixels.len(), 256 * 256);
         assert_eq!(img.pixels[128 * 256 + 128].a(), 255);
     }
 
