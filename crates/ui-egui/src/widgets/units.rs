@@ -6,6 +6,7 @@ pub fn unit_of_key(key: &str) -> photocraft_engine::prefs::Unit {
     use photocraft_engine::prefs::Unit;
     match key {
         "in" => Unit::Inches,
+        "ft" | "feet" => Unit::Feet,
         "cm" => Unit::Centimeters,
         "mm" => Unit::Millimeters,
         "pt" => Unit::Points,
