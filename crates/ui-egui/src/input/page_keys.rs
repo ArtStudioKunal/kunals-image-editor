@@ -69,11 +69,7 @@ pub fn handle(app: &mut PhotocraftApp, ctx: &egui::Context) -> bool {
             });
             let side = if key == Key::PageUp { "left" } else { "right" };
             let command = if board_id.is_some() { "layer.artboard.addBeside" } else { "layer.new.artboard" };
-            let params = if board_id.is_some() {
-                serde_json::json!({"side": side, "duplicate": false})
-            } else {
-                serde_json::json!({"background": "white"})
-            };
+            let params = if board_id.is_some() { serde_json::json!({"side": side, "duplicate": false}) } else { serde_json::json!({"background": "white"}) };
             if let Err(err) = app.run(command, params) {
                 app.ui.status = err.to_string();
             }
