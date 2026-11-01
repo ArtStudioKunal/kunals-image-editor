@@ -7,7 +7,7 @@ use egui::{Color32, Context, Id, Rect, TextureHandle, TextureOptions, Ui, pos2};
 use photocraft_codecs::{ChannelLayout, SampleType};
 
 /// 128 px: sharp at 20 pt on a 3× display, and the mipmaps keep it clean at 1×.
-const ICON_PNG: &[u8] = include_bytes!("../../../../assets/app-icon/hicolor/128x128/apps/ai.storyteller.photocraft.png");
+const ICON_PNG: &[u8] = include_bytes!("../../../../assets/app-icon/kimagepro.png");
 
 /// The icon's pixels (one transparent pixel if it couldn't be decoded, which a test rules out).
 fn decode() -> egui::ColorImage {
@@ -57,10 +57,10 @@ mod tests {
     #[test]
     fn the_icon_decodes_to_a_rounded_128_px_tile() {
         let img = decode();
-        assert_eq!(img.size, [128, 128]);
+        assert_eq!(img.size, [256, 256]);
         // Rounded corners: the corner pixel is transparent, the centre opaque.
         assert_eq!(img.pixels[0].a(), 0);
-        assert_eq!(img.pixels[64 * 128 + 64].a(), 255);
+        assert_eq!(img.pixels[128 * 256 + 128].a(), 255);
     }
 
     #[test]
@@ -73,7 +73,7 @@ mod tests {
         app.custom_titlebar = true;
         let mut frame = || {
             let mut out = ctx.run_ui(egui::RawInput::default(), |ui| crate::panels::title_bar(&mut app, ui));
-            let uploads = out.textures_delta.set.values().flat_map(|d| d.iter()).filter(|d| d.image.size() == [128, 128]).count();
+            let uploads = out.textures_delta.set.values().flat_map(|d| d.iter()).filter(|d| d.image.size() == [256, 256]).count();
             out.textures_delta.clear();
             uploads
         };
