@@ -53,6 +53,7 @@ fn unit_label(u: Unit) -> &'static str {
     match u {
         Unit::Pixels => "Pixels",
         Unit::Inches => "Inches",
+        Unit::Feet => "Feet",
         Unit::Centimeters => "Centimeters",
         Unit::Millimeters => "Millimeters",
         Unit::Points => "Points",
@@ -62,11 +63,11 @@ fn unit_label(u: Unit) -> &'static str {
 }
 
 /// Every length unit, in the Preferences › Units & Rulers order.
-const UNITS: [Unit; 7] = [Unit::Pixels, Unit::Inches, Unit::Centimeters, Unit::Millimeters, Unit::Points, Unit::Picas, Unit::Percent];
+const UNITS: [Unit; 8] = [Unit::Pixels, Unit::Inches, Unit::Feet, Unit::Centimeters, Unit::Millimeters, Unit::Points, Unit::Picas, Unit::Percent];
 
 /// The units Photoshop's Create Rectangle (and the other shape dialogs) offer on a right-click of
 /// Width or Height: the lengths, without Percent.
-pub(crate) const LENGTH_UNITS: [Unit; 6] = [Unit::Pixels, Unit::Inches, Unit::Centimeters, Unit::Millimeters, Unit::Points, Unit::Picas];
+pub(crate) const LENGTH_UNITS: [Unit; 7] = [Unit::Pixels, Unit::Inches, Unit::Feet, Unit::Centimeters, Unit::Millimeters, Unit::Points, Unit::Picas];
 
 /// The ruler right-click menu: every unit of `units` with its (translated) label and whether it's
 /// the one in effect. Picking one changes the ruler unit exactly as the preference pane does.
