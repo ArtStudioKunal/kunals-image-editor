@@ -749,4 +749,3 @@ fn multipage_adjacent_pages_can_be_added_on_both_sides_and_undone() {
     s.undo();
     assert_eq!(doc(&s).artboards().len(), 1);
 }
-
