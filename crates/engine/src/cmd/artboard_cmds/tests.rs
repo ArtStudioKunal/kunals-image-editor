@@ -730,3 +730,23 @@ fn from_layers_defaults_are_the_selected_layers_size() {
     assert_eq!(from_layers_defaults(&s), Some(("Artboard 1".to_string(), [100, 80])), "an empty layer: the canvas");
     assert_eq!(from_layers_defaults(&Session::new()), None);
 }
+
+/// KimagePro Multipage page creation uses the existing adjacent-artboard command.
+/// Each operation is undoable and starts with an independent empty page.
+#[test]
+fn multipage_adjacent_pages_can_be_added_on_both_sides_and_undone() {
+    let mut s = session(8);
+    let first = s.execute("layer.new.artboard", json!({"rect": [0, 0, 100, 80]})).unwrap();
+    let first_id = first["layer"].as_u64().unwrap();
+    let right = s.execute("layer.artboard.addBeside", json!({"layer": first_id, "side": "right"})).unwrap();
+    assert_eq!(right["rect"], json!([200, 0, 100, 80]));
+    let left = s.execute("layer.artboard.addBeside", json!({"layer": first_id, "side": "left"})).unwrap();
+    assert_eq!(doc(&s).artboards().len(), 3);
+    assert!(left["layer"].as_u64().is_some());
+    assert!(doc(&s).size.width >= 300);
+    s.undo();
+    assert_eq!(doc(&s).artboards().len(), 2);
+    s.undo();
+    assert_eq!(doc(&s).artboards().len(), 1);
+}
+
