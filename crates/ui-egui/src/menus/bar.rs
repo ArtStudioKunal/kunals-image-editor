@@ -1,7 +1,6 @@
 use super::invoke::invoke;
 use super::items::{ItemCache, MenuItem, menu_items};
-use super::render::{alt_click, render_level, render_level_rows};
-use super::search::help_search;
+use super::render::{alt_click, render_level};
 use super::{PhotocraftApp, TOP_MENUS, Value, json};
 
 /// Draws the menu bar; returns the inner edge of the menu titles, facing the rest of the title bar
