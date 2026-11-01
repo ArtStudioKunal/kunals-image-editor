@@ -42,6 +42,14 @@ pub fn options(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
         }
     }
     ui.add_space(6.0);
+    for (cmd, icon, label) in DISTRIBUTE {
+        let tip = format!("{}: {}", tl!("Distribute"), tl!(label));
+        let on = app.session.is_enabled(cmd);
+        if ui.add_enabled_ui(on, |ui| icons::button_with_icon_size(ui, icon, 28.0, 20.0, false, &tip)).inner.clicked() {
+            let _ = app.run(cmd, json!({}));
+        }
+    }
+    ui.add_space(6.0);
     let more = icons::button_with_icon_size(ui, "ellipsis", 28.0, 20.0, false, tl!("Align and distribute"));
     egui::Popup::menu(&more).show(|ui| {
         ui.set_min_width(200.0);
