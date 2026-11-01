@@ -94,15 +94,7 @@ pub fn menu_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) -> f32 {
                         if mine.is_empty() {
                             ui.weak(crate::i18n::tr(lang, "(coming soon)"));
                         }
-                        if *top == "Help" {
-                            // The search field scrolls with the rows, as part of the menu's content.
-                            crate::menu_nav::level(ui, 1, &mut nav, |ui, nav| {
-                                help_search(ui, items, opening, &mut clicked, nav);
-                                render_level_rows(ui, &mine, 1, &mut clicked, nav);
-                            });
-                        } else {
-                            render_level(ui, &mine, 1, &mut clicked, &mut nav);
-                        }
+                        render_level(ui, &mine, 1, &mut clicked, &mut nav);
                     });
                 buttons.push(title);
             }
