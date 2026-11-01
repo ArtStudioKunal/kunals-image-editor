@@ -82,7 +82,7 @@ const DEPTH_OPTIONS: &[(u64, &str, &str)] = &[(8, "8 bit", "Integer"), (16, "16 
 
 /// Width/Height units: (key, label, units per inch; 0 = pixels).
 pub const UNITS: &[(&str, &str, f32)] =
-    &[("px", "Pixels", 0.0), ("in", "Inches", 1.0), ("cm", "Centimeters", 2.54), ("mm", "Millimeters", 25.4), ("pt", "Points", 72.0), ("pica", "Picas", 6.0)];
+    &[("px", "Pixels", 0.0), ("in", "Inches", 1.0), ("ft", "Feet", 1.0 / 12.0), ("cm", "Centimeters", 2.54), ("mm", "Millimeters", 25.4), ("pt", "Points", 72.0), ("pica", "Picas", 6.0)];
 
 /// Pixels to the display unit at `ppi`.
 pub fn to_unit(px: f32, unit: &str, ppi: f32) -> f32 {
