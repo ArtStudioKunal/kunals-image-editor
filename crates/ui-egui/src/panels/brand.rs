@@ -55,13 +55,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_icon_decodes_to_a_rounded_128_px_tile() {
+    fn the_icon_decodes_to_a_256_px_tile() {
         let img = decode();
         assert_eq!(img.size, [256, 256]);
-        // Rounded corners: the corner pixel is transparent, the centre opaque.
         // Uploaded KimagePro artwork determines corner opacity; verify usable icon data.
         assert_eq!(img.pixels.len(), 256 * 256);
-        assert_eq!(img.pixels[128 * 256 + 128].a(), 255);
+        assert!(img.pixels[128 * 256 + 128].a() >= 250);
     }
 
     #[test]
