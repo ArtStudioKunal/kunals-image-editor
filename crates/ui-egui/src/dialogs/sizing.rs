@@ -10,8 +10,8 @@ use crate::PhotocraftApp;
 use crate::state::DialogKind;
 use crate::theme::Tokens;
 
-const UNITS: [(&str, &str); 7] =
-    [("px", "Pixels"), ("percent", "Percent"), ("in", "Inches"), ("cm", "Centimeters"), ("mm", "Millimeters"), ("pt", "Points"), ("pica", "Picas")];
+const UNITS: [(&str, &str); 8] =
+    [("px", "Pixels"), ("percent", "Percent"), ("in", "Inches"), ("ft", "Feet"), ("cm", "Centimeters"), ("mm", "Millimeters"), ("pt", "Points"), ("pica", "Picas")];
 
 /// Dialog unit for the Units & Rulers preference.
 fn pref_unit(u: photocraft_engine::prefs::Unit) -> &'static str {
@@ -20,6 +20,7 @@ fn pref_unit(u: photocraft_engine::prefs::Unit) -> &'static str {
         Unit::Pixels => "px",
         Unit::Percent => "percent",
         Unit::Inches => "in",
+        Unit::Feet => "ft",
         Unit::Centimeters => "cm",
         Unit::Millimeters => "mm",
         Unit::Points => "pt",
