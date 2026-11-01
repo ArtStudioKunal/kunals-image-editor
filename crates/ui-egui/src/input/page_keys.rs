@@ -63,22 +63,19 @@ pub fn handle(app: &mut PhotocraftApp, ctx: &egui::Context) -> bool {
             direction
         });
         if let Some(key) = direction {
-            let Some(doc) = app.session.active().map(|state| &state.doc) else {
-                return true;
-            };
-            let width = doc.artboards().first().map_or(doc.size.width, |(_, _, board)| board.rect.width());
-            let height = doc.artboards().first().map_or(doc.size.height, |(_, _, board)| board.rect.height());
-            let left = doc.artboards().iter().map(|(_, _, b)| b.rect.x0).min().unwrap_or(0);
-            let right = doc.artboards().iter().map(|(_, _, b)| b.rect.x1).max().unwrap_or(0);
-            let y = doc.artboards().iter().map(|(_, _, b)| b.rect.y0).min().unwrap_or(0);
-            let x = if key == Key::PageUp { i64::from(left) - i64::from(width) - 100 } else { i64::from(right) + 100 };
-            let rect = [x, i64::from(y), i64::from(width), i64::from(height)];
-            if x >= i64::from(i32::MIN) && x + i64::from(width) <= i64::from(i32::MAX) {
-                if let Err(err) = app.run("layer.new.artboard", serde_json::json!({"rect": rect, "background": "white"})) {
-                    app.ui.status = err.to_string();
-                }
+            let board_id = app.session.active().and_then(|state| {
+                let active = state.active_layer?;
+                state.doc.artboard_of(active)
+            });
+            let side = if key == Key::PageUp { "left" } else { "right" };
+            let command = if board_id.is_some() { "layer.artboard.addBeside" } else { "layer.new.artboard" };
+            let params = if board_id.is_some() {
+                serde_json::json!({"side": side, "duplicate": false})
             } else {
-                app.ui.status = "No room for another page at this coordinate".into();
+                serde_json::json!({"background": "white"})
+            };
+            if let Err(err) = app.run(command, params) {
+                app.ui.status = err.to_string();
             }
             ctx.request_repaint();
             return true;
