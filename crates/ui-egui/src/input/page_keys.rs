@@ -48,22 +48,20 @@ pub fn handle(app: &mut PhotocraftApp, ctx: &egui::Context) -> bool {
         let direction = ctx.input_mut(|input| {
             let mut direction = None;
             input.events.retain(|event| {
-                if let Event::Key { key, pressed: true, modifiers, .. } = event {
-                    if !modifiers.alt && !modifiers.ctrl && !modifiers.command && !modifiers.shift
-                        && matches!(key, Key::PageUp | Key::PageDown)
-                    {
-                        direction = Some(*key);
-                        return false;
-                    }
+                if let Event::Key { key, pressed: true, modifiers, .. } = event
+                    && !modifiers.alt && !modifiers.ctrl && !modifiers.command && !modifiers.shift && matches!(key, Key::PageUp | Key::PageDown)
+                {
+                    direction = Some(*key);
+                    return false;
                 }
                 true
             });
             direction
         });
         if let Some(key) = direction {
-            let doc = &app.session.active().expect("checked above").doc;
-            let width = doc.artboards().first().map_or(doc.size.width, |(_, _, board)| board.rect.width() as u32);
-            let height = doc.artboards().first().map_or(doc.size.height, |(_, _, board)| board.rect.height() as u32);
+            let Some(doc) = app.session.active().map(|state| &state.doc) else { return true };
+            let width = doc.artboards().first().map_or(doc.size.width, |(_, _, board)| board.rect.width());
+            let height = doc.artboards().first().map_or(doc.size.height, |(_, _, board)| board.rect.height());
             let left = doc.artboards().iter().map(|(_, _, b)| b.rect.x0).min().unwrap_or(0);
             let right = doc.artboards().iter().map(|(_, _, b)| b.rect.x1).max().unwrap_or(0);
             let y = doc.artboards().iter().map(|(_, _, b)| b.rect.y0).min().unwrap_or(0);
