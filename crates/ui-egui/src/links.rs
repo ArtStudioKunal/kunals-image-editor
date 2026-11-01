@@ -105,14 +105,7 @@ mod tests {
         assert_eq!(
             help,
             [
-                "help.discord",
-                "help.website",
-                "help.artcraftWebsite",
-                "help.github",
-                "help.reportIssue",
-                "help.checkForUpdates",
                 "---",
-                "help.systemInfo",
                 "help.about"
             ]
         );
