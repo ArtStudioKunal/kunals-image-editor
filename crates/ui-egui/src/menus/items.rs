@@ -181,6 +181,17 @@ pub fn menu_items(app: &PhotocraftApp) -> Vec<MenuItem> {
             items.insert(after + 1 + k, it);
         }
     }
+    // KimagePro has a single Help item. Keep notices in the distributed license files.
+    items.retain(|item| item.path.first().map(String::as_str) != Some("Help"));
+    items.push(MenuItem {
+        id: "help.about".into(),
+        label: "About KimagePro".into(),
+        path: vec!["Help".into()],
+        shortcut: None,
+        enabled: true,
+        checked: None,
+        color: None,
+    });
     // Keep the update command with the links, ahead of System Info and About.
     if let Some(at) = items.iter().position(|i| i.id == "help.checkForUpdates") {
         let update = items.remove(at);

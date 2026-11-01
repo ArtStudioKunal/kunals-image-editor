@@ -50,7 +50,7 @@ macro_rules! choice {
 
 choice!(
     /// Length units for rulers, the Info panel and size dialogs.
-    Unit { Pixels = "pixels", Inches = "inches", Centimeters = "cm", Millimeters = "mm", Points = "points", Picas = "picas", Percent = "percent" } default Pixels
+    Unit { Pixels = "pixels", Inches = "inches", Feet = "feet", Centimeters = "cm", Millimeters = "mm", Points = "points", Picas = "picas", Percent = "percent" } default Pixels
 );
 choice!(TypeUnit { Points = "points", Pixels = "pixels", Millimeters = "mm" } default Points);
 choice!(PointSize { PostScript = "postScript", Traditional = "traditional" } default PostScript);
@@ -124,6 +124,7 @@ impl Unit {
         match self {
             Unit::Pixels => px,
             Unit::Inches => px / dpi,
+            Unit::Feet => px / dpi / 12.0,
             Unit::Centimeters => px / dpi * 2.54,
             Unit::Millimeters => px / dpi * 25.4,
             Unit::Points => px / dpi * ppi,
@@ -137,6 +138,7 @@ impl Unit {
         match self {
             Unit::Pixels => v,
             Unit::Inches => v * dpi,
+            Unit::Feet => v * 12.0 * dpi,
             Unit::Centimeters => v / 2.54 * dpi,
             Unit::Millimeters => v / 25.4 * dpi,
             Unit::Points => v / ppi.max(1e-6) * dpi,
@@ -149,6 +151,7 @@ impl Unit {
         match self {
             Unit::Pixels => "px",
             Unit::Inches => "in",
+            Unit::Feet => "ft",
             Unit::Centimeters => "cm",
             Unit::Millimeters => "mm",
             Unit::Points => "pt",
@@ -164,7 +167,7 @@ impl Unit {
             Unit::Pixels => 0,
             Unit::Points | Unit::Percent => 1,
             Unit::Millimeters | Unit::Centimeters | Unit::Picas => 2,
-            Unit::Inches => 3,
+            Unit::Inches | Unit::Feet => 3,
         }
     }
     /// A length as typed in Photoshop's numeric fields: a number with an optional unit suffix

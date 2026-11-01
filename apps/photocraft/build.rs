@@ -21,11 +21,11 @@ fn main() {
     }
     let mut res = winresource::WindowsResource::new();
     res.set_icon("../../assets/app-icon/photocraft.ico")
-        .set("ProductName", "Kunal's Image Editor")
-        .set("FileDescription", "Kunal's Image Editor")
+        .set("ProductName", "KimagePro")
+        .set("FileDescription", "KimagePro image editor")
         .set("CompanyName", "Learning Machines LLC")
         .set("LegalCopyright", "Copyright (c) the PhotoCraft authors. MIT OR Apache-2.0.")
-        .set("OriginalFilename", "KunalsImageEditor.exe")
+        .set("OriginalFilename", "KimagePro.exe")
         .set("InternalName", "photocraft");
     if let Err(e) = res.compile() {
         if std::env::var_os("PHOTOCRAFT_REQUIRE_WINRES").is_some() {

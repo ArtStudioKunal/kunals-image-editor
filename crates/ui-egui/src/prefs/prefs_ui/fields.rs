@@ -491,18 +491,32 @@ fn field_rows(ui: &mut egui::Ui, section: &str, obj: &mut Map<String, Value>, ke
                 ui.label(RichText::new(tl!("Scratch disks")).color(t.text_dim));
                 let mut items = items.clone();
                 ui.vertical(|ui| {
-                    for d in &mut items {
+                    let mut remove = None;
+                    for (index, d) in items.iter_mut().enumerate() {
                         ui.horizontal(|ui| {
                             let mut on = d.get("enabled").and_then(Value::as_bool).unwrap_or(false);
                             let mut path = d.get("path").and_then(Value::as_str).unwrap_or("").to_string();
                             crate::widgets::checkbox(ui, &mut on, tl!("Enabled"));
-                            ui.add(egui::TextEdit::singleline(&mut path).desired_width(240.0)).accessible_name(tl!("Path"));
+                            ui.add(egui::TextEdit::singleline(&mut path).desired_width(240.0).hint_text("(system temp) or folder path"))
+                                .accessible_name(tl!("Path"));
+                            if ui.small_button("Remove").clicked() {
+                                remove = Some(index);
+                            }
                             *d = json!({"enabled": on, "path": path});
                         });
                     }
-                    if ui.small_button(tl!("Add disk")).clicked() {
-                        items.push(json!({"enabled": true, "path": ""}));
+                    if let Some(index) = remove {
+                        items.remove(index);
                     }
+                    ui.horizontal(|ui| {
+                        if ui.small_button(tl!("Add disk")).clicked() {
+                            items.push(json!({"enabled": true, "path": "(system temp)"}));
+                        }
+                        if ui.small_button("Reset to system temp").clicked() {
+                            items = vec![json!({"enabled": true, "path": "(system temp)"})];
+                        }
+                    });
+                    ui.small("Scratch disk locations are saved as preferences. Disk-backed image tile spilling is not yet implemented.");
                 });
                 obj.insert(k, Value::Array(items));
             }

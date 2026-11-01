@@ -362,22 +362,9 @@ fn dialog_body(app: &mut PhotocraftApp, ui: &mut egui::Ui, d: &Dialog, fields: &
             }
         }
         DialogKind::About => {
-            // Tabs About · Contributors · Models. The
-            // tab is a dialog field, so automation can switch it with `ui.dialog.set`.
-            let tab = about_tab(fields);
-            let mut chosen = tab;
-            ui.horizontal(|ui| {
-                for (key, label) in [("about", tl!("About")), ("contributors", tl!("Contributors")), ("models", tl!("Models"))] {
-                    if crate::widgets::pill_tab(ui, label, tab == key).clicked() {
-                        chosen = key;
-                    }
-                }
-            });
-            if chosen != tab {
-                fields.insert("tab".into(), json!(chosen));
-            }
-            ui.add_space(8.0);
-            about_tab_body(app, ui, chosen);
+            ui.heading("KimagePro");
+            ui.add_space(10.0);
+            ui.label("Build by Kunal Sagar, for help contact artstudio.kunalsagar@gmail.com");
         }
         DialogKind::Command => outcome = command_body(app, ui, d, fields, id, interactive),
         DialogKind::LayerStyle => outcome = crate::layer_style::body_with_response(app, ui, fields, interactive),
@@ -756,7 +743,7 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
 }
 
 /// The About window's tabs, as stored in its `tab` field.
-pub const ABOUT_TABS: [&str; 3] = ["about", "contributors", "models"];
+pub const ABOUT_TABS: [&str; 1] = ["about"];
 
 /// The About tab to show: the `tab` field when it names one, otherwise "about".
 fn about_tab(fields: &serde_json::Map<String, Value>) -> &'static str {
@@ -810,7 +797,7 @@ pub fn title(d: &Dialog) -> String {
     match d.kind {
         DialogKind::NewDocument => "New Document".into(),
         DialogKind::About if d.fields.get("systemInfo").and_then(Value::as_bool) == Some(true) => "System Info".into(),
-        DialogKind::About => "About PhotoCraft".into(),
+        DialogKind::About => "About KimagePro".into(),
         DialogKind::LayerStyle => "Layer Style".into(),
         DialogKind::Command => d.fields.get("__label").and_then(Value::as_str).unwrap_or("Command").trim_end_matches('…').to_string(),
         DialogKind::Error => "Error".into(),
