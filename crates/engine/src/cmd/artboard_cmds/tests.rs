@@ -835,4 +835,23 @@ fn multipage_pcraft_round_trip_keeps_page_order_and_properties() {
     assert_eq!(restored.layer(LayerId(cover)).unwrap().artboard().unwrap().rect.width(), 32);
     assert_eq!(restored.layer(LayerId(content)).unwrap().artboard().unwrap().rect.width(), 48);
     assert_eq!(restored.layer(LayerId(content)).unwrap().artboard().unwrap().rect.height(), 64);
+
+    // The flattened multipage PDF must use the same page order and physical
+    // dimensions as the native document, not the reverse layer stack.
+    let pdf_path = std::env::temp_dir().join(format!("kimagepro-multipage-{}.pdf", std::process::id()));
+    let pdf_name = pdf_path.to_string_lossy().into_owned();
+    let result = s.execute("file.export.artboardsToPdf", json!({"path": pdf_name})).unwrap();
+    assert_eq!(result["pages"], 2);
+    let bytes = std::fs::read(&pdf_path).unwrap();
+    let text = String::from_utf8_lossy(&bytes);
+    let media: Vec<String> = text.split("/MediaBox [0 0 ").skip(1).filter_map(|part| part.split_once(']').map(|(box_size, _)| box_size.to_string())).collect();
+    let points_per_pixel = 72.0 / f64::from(doc(&s).resolution_dpi.max(1.0));
+    assert_eq!(
+        media,
+        [
+            format!("{:.3} {:.3}", 32.0 * points_per_pixel, 48.0 * points_per_pixel),
+            format!("{:.3} {:.3}", 48.0 * points_per_pixel, 64.0 * points_per_pixel)
+        ]
+    );
+    let _ = std::fs::remove_file(pdf_path);
 }
