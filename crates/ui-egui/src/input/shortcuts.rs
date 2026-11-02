@@ -874,6 +874,11 @@ fn handle_escape_and_view_keys(app: &mut PhotocraftApp, ctx: &egui::Context) {
     // A held tool letter is a spring-loaded tool (#2672), not a burst of presses: its key
     // repeats are dropped rather than cycling the group.
     ctx.input_mut(|i| i.events.retain(|e| !matches!(e, egui::Event::Key { key, pressed: true, repeat: true, .. } if crate::spring_tools::is_tool_key(*key))));
+    // In Multipage, CorelDRAW-style bare letters align selected objects.
+    // Consume these ahead of Photoshop's single-letter tool switching.
+    if multipage_align_keys(app, ctx) {
+        return;
+    }
     if select_tool_by_key(app, ctx, &pressed) {
         return;
     }
@@ -883,6 +888,55 @@ fn handle_escape_and_view_keys(app: &mut PhotocraftApp, ctx: &egui::Context) {
     }
     // 1–0 set opacity, ⇧1–0 flow or fill (`opacity_keys`).
     crate::opacity_keys::handle(app, ctx);
+}
+
+/// CorelDRAW-style alignment commands for the Multipage workspace only.
+fn multipage_align_command(key: Key) -> Option<&'static [&'static str]> {
+    Some(match key {
+        Key::P => &["horizontalCenters", "verticalCenters"],
+        Key::L => &["leftEdges"],
+        Key::R => &["rightEdges"],
+        Key::T => &["topEdges"],
+        Key::B => &["bottomEdges"],
+        Key::C => &["horizontalCenters"],
+        Key::E => &["verticalCenters"],
+        _ => return None,
+    })
+}
+
+fn multipage_align_keys(app: &mut PhotocraftApp, ctx: &egui::Context) -> bool {
+    if app.ui.workspace != "Multipage" || ctx.text_edit_focused() {
+        return false;
+    }
+    let has_selection = app.session.active().is_some_and(|st| !st.selected_layers().is_empty());
+    if !has_selection {
+        return false;
+    }
+    let key = ctx.input_mut(|input| {
+        let mut found = None;
+        input.events.retain(|event| {
+            if let egui::Event::Key { key, pressed: true, repeat: false, modifiers, .. } = event
+                && !modifiers.alt && !modifiers.command && !modifiers.ctrl && !modifiers.shift
+                && multipage_align_command(*key).is_some()
+            {
+                found = Some(*key);
+                return false;
+            }
+            true
+        });
+        found
+    });
+    let Some(key) = key else { return false };
+    if let Some(alignments) = multipage_align_command(key) {
+        for edge in alignments {
+            if let Err(error) = app.run(&format!("layer.align.{edge}"), json!({"to": "auto"})) {
+                app.ui.status = error;
+                app.ui.status_error = true;
+                break;
+            }
+        }
+    }
+    true
 }
 
 /// Selects a tool from its letter key. Pressing the key of the current group cycles within it; with
