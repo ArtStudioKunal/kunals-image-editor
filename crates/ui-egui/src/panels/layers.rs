@@ -162,7 +162,12 @@ pub(super) fn layers(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                 let (tile, _) = ui.allocate_exact_size(egui::vec2(30.0, 38.0), egui::Sense::hover());
                 let painter = ui.painter();
                 painter.rect_filled(tile.shrink(2.0), 2.0, egui::Color32::WHITE);
-                painter.rect_stroke(tile.shrink(2.0), 2.0, egui::Stroke::new(1.0, if is_selected { egui::Color32::LIGHT_BLUE } else { egui::Color32::GRAY }), egui::StrokeKind::Inside);
+                painter.rect_stroke(
+                    tile.shrink(2.0),
+                    2.0,
+                    egui::Stroke::new(1.0, if is_selected { egui::Color32::LIGHT_BLUE } else { egui::Color32::GRAY }),
+                    egui::StrokeKind::Inside,
+                );
                 let label = format!("{} · {} ({} × {})", index + 1, name, rect.width(), rect.height());
                 if ui.selectable_label(is_selected, label).clicked() {
                     actions.push(("layer.select".into(), json!({"layer": id.0})));
@@ -171,7 +176,6 @@ pub(super) fn layers(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
         }
         ui.separator();
     }
-
 
     let t = Tokens::get(ui.ctx());
     app.reorder_preview_hit = false;
