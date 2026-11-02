@@ -1,6 +1,6 @@
 # KimagePro Multipage — Development specification
 
-Status: **Early implementation**. The built-in **Multipage** workspace is selectable. Initial Page Up/Down handling now creates persistent, white artboards to the left or right using existing artboard commands. This is not a complete multipage layout engine; page order, editing off-page, paste in place, and complete persistence validation remain unfinished.
+Status: **Early implementation, unmerged**. The built-in **Multipage** workspace is selectable. Page Up/Down insert artboard-backed pages before/after the active page (except during text editing); basic page controls show pages in the same top-to-bottom order used by PDF export. Ordered insertion, duplication, reordering, and undo have automated regression tests. The artboard backing is not yet a true multipage document model; off-page editing, paste in place, detailed page metadata, and complete save/reopen validation remain unfinished.
 
 ## Hard constraints
 - No AI, model inference, external AI services, or AI-powered tools.
@@ -10,15 +10,15 @@ Status: **Early implementation**. The built-in **Multipage** workspace is select
 
 ## Milestone 1: page model and pasteboard
 
-Current progress: existing persistent artboards are reused as an initial page primitive. No page organizer panel or true page identity/order metadata has been added.
+Current progress: existing artboards are reused as initial page primitives. A basic Pages section offers selection, blank creation, duplication, deletion, visual geometry tiles, and reordering; reading order is derived from top-level layer order, including PDF export. True page identity/order metadata, content thumbnails, and page-independent placement have **not** been added.
 - Persist ordered pages with stable IDs, page dimensions, margins, bleed, optional facing-page arrangement, and page-specific object associations.
 - Provide an editable pasteboard beyond pages. Off-page objects remain visible, selectable, transformable, and saved with the document, but are excluded from PDF output unless intersecting the exported page or bleed.
 - Test hit-testing and rendering at negative canvas coordinates; no destructive clipping when objects leave a page.
-- Page thumbnails, insert before/after, duplicate/delete/reorder, named pages and page selection.
+- Rendered content thumbnails, editable page names, and durable page-specific properties remain. Basic insertion before/after, geometry preview tiles, duplicate/delete/reorder, and page selection are present on the development branch.
 - Distinguish page position (within page) from workspace placement (where each page appears on pasteboard).
 
 ## Keyboard behavior to verify with owner
-The user describes Page Up/Down **creating** pages, without having selected the previously offered alternative navigation behavior. Provisional behavior: Page Down inserts a page after the current page; Page Up inserts before. Only active in Multipage and only when text editing is not focused. A different navigation shortcut may be added.
+The user describes Page Up/Down **creating** pages. Current provisional behavior: Page Down inserts after the current page; Page Up inserts before, in both page list and PDF export order. Only bare nonrepeating keys act in Multipage, and focused input or active text editing suppresses insertion. Other workspaces retain the original scrolling shortcuts. A separate navigation shortcut may be added.
 
 ## Milestone 2: object alignment and paste-in-place
 - P centers selection on active page; L/R/T/B and E/C follow CorelDRAW conventions, scoped to Multipage only.
