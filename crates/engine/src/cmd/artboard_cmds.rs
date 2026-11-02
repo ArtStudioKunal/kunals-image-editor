@@ -727,14 +727,7 @@ pub fn specs() -> Vec<CommandSpec> {
         };
     }
     vec![
-        spec!(
-            "multipage.page.delete",
-            "Delete Page",
-            &[],
-            r##"{"layer":id?} → {deleted}"##,
-            has_active_artboard,
-            delete_page
-        ),
+        spec!("multipage.page.delete", "Delete Page", &[], r##"{"layer":id?} → {deleted}"##, has_active_artboard, delete_page),
         spec!(
             "multipage.page.reorder",
             "Reorder Page",
