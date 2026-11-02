@@ -71,6 +71,7 @@ mod startup_report;
 mod tablet;
 mod ui_state;
 mod window_frame;
+mod updates;
 
 use photocraft_engine::Session;
 use photocraft_ui_egui::PhotocraftApp;
