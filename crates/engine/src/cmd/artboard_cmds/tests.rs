@@ -759,7 +759,7 @@ fn multipage_delete_and_reorder_are_undoable() {
     let b = second["layer"].as_u64().unwrap();
     assert_eq!(doc(&s).artboards().len(), 2);
     let original: Vec<LayerId> = doc(&s).layers.iter().filter(|l| l.artboard().is_some()).map(|l| l.id).collect();
-    s.execute("multipage.page.reorder", json!({"layer": a, "step": "next"})).unwrap();
+    s.execute("multipage.page.reorder", json!({"layer": a, "step": "previous"})).unwrap();
     let reordered: Vec<LayerId> = doc(&s).layers.iter().filter(|l| l.artboard().is_some()).map(|l| l.id).collect();
     assert_eq!(reordered, original.iter().rev().copied().collect::<Vec<_>>());
     s.undo();
@@ -770,4 +770,48 @@ fn multipage_delete_and_reorder_are_undoable() {
     s.undo();
     assert_eq!(doc(&s).artboards().len(), 2);
     assert!(s.execute("multipage.page.delete", json!({"layer": 999999999_u64})).is_err());
+}
+
+
+/// The visible Pages panel and PDF must share the same top-to-bottom reading order.
+/// "before"/"after" are explicit and do not change the regular Artboard tool's
+/// legacy stacking when the option is omitted.
+#[test]
+fn multipage_insert_before_after_and_reorder_match_export_order() {
+    let mut s = session(8);
+    let first = s.execute("layer.new.artboard", json!({"rect": [0, 0, 30, 40]})).unwrap()["layer"].as_u64().unwrap();
+    let after = s.execute("layer.artboard.addBeside", json!({"layer": first, "side": "right", "pageOrder": "after"})).unwrap()["layer"]
+        .as_u64().unwrap();
+    assert_eq!(chosen_artboards(doc(&s), &json!({})), vec![LayerId(first), LayerId(after)]);
+    let before = s.execute("layer.artboard.addBeside", json!({"layer": first, "side": "left", "pageOrder": "before"})).unwrap()["layer"]
+        .as_u64().unwrap();
+    assert_eq!(chosen_artboards(doc(&s), &json!({})), vec![LayerId(before), LayerId(first), LayerId(after)]);
+
+    // Reorder edits the logical page order, without moving any artboard on the canvas.
+    let original_rect = board_rect(&s, after);
+    s.execute("multipage.page.reorder", json!({"layer": after, "step": "previous"})).unwrap();
+    assert_eq!(chosen_artboards(doc(&s), &json!({})), vec![LayerId(before), LayerId(after), LayerId(first)]);
+    assert_eq!(board_rect(&s, after), original_rect);
+    s.undo();
+    assert_eq!(chosen_artboards(doc(&s), &json!({})), vec![LayerId(before), LayerId(first), LayerId(after)]);
+
+    // A right-side duplicate can also follow the active page in export order.
+    let duplicate = s.execute(
+        "layer.artboard.addBeside",
+        json!({"layer": first, "side": "right", "duplicate": true, "pageOrder": "after"}),
+    ).unwrap()["layer"].as_u64().unwrap();
+    assert_eq!(chosen_artboards(doc(&s), &json!({})), vec![LayerId(before), LayerId(first), LayerId(duplicate), LayerId(after)]);
+    s.undo();
+    assert_eq!(chosen_artboards(doc(&s), &json!({})), vec![LayerId(before), LayerId(first), LayerId(after)]);
+
+    // A rejected order does not mutate the document or its undo history.
+    assert_rejected(&mut s, "layer.artboard.addBeside", json!({"layer": first, "pageOrder": "sideways"}));
+}
+
+#[test]
+fn multipage_legacy_artboard_insertion_keeps_original_stack_order() {
+    let mut s = session(8);
+    let first = s.execute("layer.new.artboard", json!({"rect": [0, 0, 30, 40]})).unwrap()["layer"].as_u64().unwrap();
+    let added = s.execute("layer.artboard.addBeside", json!({"layer": first, "side": "right"})).unwrap()["layer"].as_u64().unwrap();
+    assert_eq!(chosen_artboards(doc(&s), &json!({})), vec![LayerId(added), LayerId(first)]);
 }
