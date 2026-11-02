@@ -813,7 +813,6 @@ fn multipage_legacy_artboard_insertion_keeps_original_stack_order() {
     assert_eq!(chosen_artboards(doc(&s), &json!({})), vec![LayerId(added), LayerId(first)]);
 }
 
-
 /// Native Pcraft saves must retain page identity, order, dimensions and names.
 /// Restoring layer order alone is not sufficient without a save/reopen check.
 #[test]
@@ -848,10 +847,7 @@ fn multipage_pcraft_round_trip_keeps_page_order_and_properties() {
     let points_per_pixel = 72.0 / f64::from(doc(&s).resolution_dpi.max(1.0));
     assert_eq!(
         media,
-        [
-            format!("{:.3} {:.3}", 32.0 * points_per_pixel, 48.0 * points_per_pixel),
-            format!("{:.3} {:.3}", 48.0 * points_per_pixel, 64.0 * points_per_pixel)
-        ]
+        [format!("{:.3} {:.3}", 32.0 * points_per_pixel, 48.0 * points_per_pixel), format!("{:.3} {:.3}", 48.0 * points_per_pixel, 64.0 * points_per_pixel)]
     );
     let _ = std::fs::remove_file(pdf_path);
 }
