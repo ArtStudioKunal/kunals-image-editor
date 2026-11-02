@@ -120,13 +120,14 @@ pub(super) fn layers(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     // Multipage uses persistent artboards as pages. Keep controls beside the
     // existing Layers tree so page selection and layer editing stay in sync.
     if app.ui.workspace == "Multipage" {
-        let boards: Vec<_> = doc.layers.iter().filter_map(|layer| layer.artboard().map(|board| (layer.id, layer.name.clone(), board.rect))).collect();
+        let boards: Vec<_> = doc.layers.iter().rev().filter_map(|layer| layer.artboard().map(|board| (layer.id, layer.name.clone(), board.rect))).collect();
         let selected = active.and_then(|id| doc.artboard_of(id));
+        let selected_pos = selected.and_then(|id| boards.iter().position(|(page_id, _, _)| *page_id == id));
         ui.heading("Pages");
         ui.horizontal_wrapped(|ui| {
             if ui.button("+ Page").clicked() {
                 actions.push(if let Some(id) = selected {
-                    ("layer.artboard.addBeside".into(), json!({"layer": id.0, "side": "right"}))
+                    ("layer.artboard.addBeside".into(), json!({"layer": id.0, "side": "right", "pageOrder": "after"}))
                 } else {
                     ("layer.new.artboard".into(), json!({"background": "white"}))
                 });
@@ -134,7 +135,7 @@ pub(super) fn layers(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
             if ui.add_enabled(selected.is_some(), egui::Button::new("Duplicate")).clicked()
                 && let Some(id) = selected
             {
-                actions.push(("layer.artboard.addBeside".into(), json!({"layer": id.0, "side": "right", "duplicate": true})));
+                actions.push(("layer.artboard.addBeside".into(), json!({"layer": id.0, "side": "right", "duplicate": true, "pageOrder": "after"})));
             }
             if ui.add_enabled(selected.is_some(), egui::Button::new("Delete")).clicked()
                 && let Some(id) = selected
@@ -143,12 +144,12 @@ pub(super) fn layers(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
             }
         });
         ui.horizontal_wrapped(|ui| {
-            if ui.add_enabled(selected.is_some(), egui::Button::new("Move Earlier")).clicked()
+            if ui.add_enabled(selected_pos.is_some_and(|i| i > 0), egui::Button::new("Move Earlier")).clicked()
                 && let Some(id) = selected
             {
                 actions.push(("multipage.page.reorder".into(), json!({"layer": id.0, "step": "previous"})));
             }
-            if ui.add_enabled(selected.is_some(), egui::Button::new("Move Later")).clicked()
+            if ui.add_enabled(selected_pos.is_some_and(|i| i + 1 < boards.len()), egui::Button::new("Move Later")).clicked()
                 && let Some(id) = selected
             {
                 actions.push(("multipage.page.reorder".into(), json!({"layer": id.0, "step": "next"})));
