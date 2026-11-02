@@ -772,7 +772,6 @@ fn multipage_delete_and_reorder_are_undoable() {
     assert!(s.execute("multipage.page.delete", json!({"layer": 999999999_u64})).is_err());
 }
 
-
 /// The visible Pages panel and PDF must share the same top-to-bottom reading order.
 /// "before"/"after" are explicit and do not change the regular Artboard tool's
 /// legacy stacking when the option is omitted.
@@ -780,11 +779,11 @@ fn multipage_delete_and_reorder_are_undoable() {
 fn multipage_insert_before_after_and_reorder_match_export_order() {
     let mut s = session(8);
     let first = s.execute("layer.new.artboard", json!({"rect": [0, 0, 30, 40]})).unwrap()["layer"].as_u64().unwrap();
-    let after = s.execute("layer.artboard.addBeside", json!({"layer": first, "side": "right", "pageOrder": "after"})).unwrap()["layer"]
-        .as_u64().unwrap();
+    let after = s.execute("layer.artboard.addBeside", json!({"layer": first, "side": "right", "pageOrder": "after"})).unwrap();
+    let after = after["layer"].as_u64().unwrap();
     assert_eq!(chosen_artboards(doc(&s), &json!({})), vec![LayerId(first), LayerId(after)]);
-    let before = s.execute("layer.artboard.addBeside", json!({"layer": first, "side": "left", "pageOrder": "before"})).unwrap()["layer"]
-        .as_u64().unwrap();
+    let before = s.execute("layer.artboard.addBeside", json!({"layer": first, "side": "left", "pageOrder": "before"})).unwrap();
+    let before = before["layer"].as_u64().unwrap();
     assert_eq!(chosen_artboards(doc(&s), &json!({})), vec![LayerId(before), LayerId(first), LayerId(after)]);
 
     // Reorder edits the logical page order, without moving any artboard on the canvas.
@@ -796,10 +795,8 @@ fn multipage_insert_before_after_and_reorder_match_export_order() {
     assert_eq!(chosen_artboards(doc(&s), &json!({})), vec![LayerId(before), LayerId(first), LayerId(after)]);
 
     // A right-side duplicate can also follow the active page in export order.
-    let duplicate = s.execute(
-        "layer.artboard.addBeside",
-        json!({"layer": first, "side": "right", "duplicate": true, "pageOrder": "after"}),
-    ).unwrap()["layer"].as_u64().unwrap();
+    let duplicate = s.execute("layer.artboard.addBeside", json!({"layer": first, "side": "right", "duplicate": true, "pageOrder": "after"})).unwrap();
+    let duplicate = duplicate["layer"].as_u64().unwrap();
     assert_eq!(chosen_artboards(doc(&s), &json!({})), vec![LayerId(before), LayerId(first), LayerId(duplicate), LayerId(after)]);
     s.undo();
     assert_eq!(chosen_artboards(doc(&s), &json!({})), vec![LayerId(before), LayerId(first), LayerId(after)]);
@@ -814,4 +811,28 @@ fn multipage_legacy_artboard_insertion_keeps_original_stack_order() {
     let first = s.execute("layer.new.artboard", json!({"rect": [0, 0, 30, 40]})).unwrap()["layer"].as_u64().unwrap();
     let added = s.execute("layer.artboard.addBeside", json!({"layer": first, "side": "right"})).unwrap()["layer"].as_u64().unwrap();
     assert_eq!(chosen_artboards(doc(&s), &json!({})), vec![LayerId(added), LayerId(first)]);
+}
+
+
+/// Native Pcraft saves must retain page identity, order, dimensions and names.
+/// Restoring layer order alone is not sufficient without a save/reopen check.
+#[test]
+fn multipage_pcraft_round_trip_keeps_page_order_and_properties() {
+    let mut s = session(8);
+    let cover = s.execute("layer.new.artboard", json!({"rect": [0, 0, 32, 48], "name": "Cover"})).unwrap();
+    let cover = cover["layer"].as_u64().unwrap();
+    let content = s.execute("layer.artboard.addBeside", json!({"layer": cover, "side": "right", "pageOrder": "after"})).unwrap();
+    let content = content["layer"].as_u64().unwrap();
+    s.execute("layer.artboard.set", json!({"layer": content, "name": "Contents", "width": 48, "height": 64})).unwrap();
+    let expected = chosen_artboards(doc(&s), &json!({}));
+    assert_eq!(expected, vec![LayerId(cover), LayerId(content)]);
+
+    let encoded = photocraft_io::export(doc(&s), "layout.pcraft", &photocraft_io::ExportOptions::default()).unwrap();
+    let restored = photocraft_io::import("layout.pcraft", &encoded.bytes).unwrap().document;
+    assert_eq!(chosen_artboards(&restored, &json!({})), expected);
+    assert_eq!(restored.layer(LayerId(cover)).unwrap().name, "Cover");
+    assert_eq!(restored.layer(LayerId(content)).unwrap().name, "Contents");
+    assert_eq!(restored.layer(LayerId(cover)).unwrap().artboard().unwrap().rect.width(), 32);
+    assert_eq!(restored.layer(LayerId(content)).unwrap().artboard().unwrap().rect.width(), 48);
+    assert_eq!(restored.layer(LayerId(content)).unwrap().artboard().unwrap().rect.height(), 64);
 }
