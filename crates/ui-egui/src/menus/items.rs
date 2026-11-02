@@ -192,6 +192,8 @@ pub fn menu_items(app: &PhotocraftApp) -> Vec<MenuItem> {
         checked: None,
         color: None,
     });
+    // KimagePro deliberately hides all upstream update commands.
+    items.retain(|item| item.id != "help.checkForUpdates");
     // Keep the update command with the links, ahead of System Info and About.
     if let Some(at) = items.iter().position(|i| i.id == "help.checkForUpdates") {
         let update = items.remove(at);
