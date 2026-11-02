@@ -447,6 +447,13 @@ fn add_beside(s: &mut Session, p: &Value) -> Result<Value> {
     };
     let src = d.doc.layer(id).and_then(Layer::artboard).cloned().ok_or_else(|| bad(cmd, "the layer is not an artboard"))?;
     let side = p.get("side").and_then(Value::as_str).unwrap_or("right");
+    // Multipage reading order is independent of canvas position.
+    // Unspecified order preserves the existing artboard stacking behavior.
+    let page_order = match p.get("pageOrder") {
+        None | Some(Value::Null) => None,
+        Some(Value::String(order)) if order == "before" || order == "after" => Some(order.as_str()),
+        _ => return Err(bad(cmd, "pageOrder must be before or after")),
+    };
     let duplicate = p.get("duplicate").and_then(Value::as_bool).unwrap_or(false);
     let [x0, y0, w, h] = xywh(src.rect);
     let gap = i64::from(GAP);
@@ -497,7 +504,7 @@ fn add_beside(s: &mut Session, p: &Value) -> Result<Value> {
             let src_rect = doc.layer(id).and_then(Layer::artboard).map(|a| a.rect).ok_or(EngineError::NoLayer(id))?;
             let (dx, dy) = (rect.x0.saturating_sub(src_rect.x0), rect.y0.saturating_sub(src_rect.y0));
             let copy = crate::commands::layer_copy(doc, id, add_copy)?;
-            let nid = doc.insert_above(Some(id), copy);
+            let nid = if page_order == Some("after") { doc.insert_below(Some(id), copy) } else { doc.insert_above(Some(id), copy) };
             // Grow the canvas first, so shapes on the board re-render uncut where they land.
             let fit = |len: u32, edge: i32| i64::from(len).max(i64::from(edge)).clamp(1, 300_000) as u32;
             doc.size = Size::new(fit(doc.size.width, rect.x1), fit(doc.size.height, rect.y1));
@@ -509,7 +516,7 @@ fn add_beside(s: &mut Session, p: &Value) -> Result<Value> {
         } else {
             let mut g = Layer::group(next_artboard_name(doc), vec![]);
             set_artboard(&mut g, Artboard { rect, background: src.background, preset: src.preset.clone() });
-            doc.insert_above(Some(id), g)
+            if page_order == Some("after") { doc.insert_below(Some(id), g) } else { doc.insert_above(Some(id), g) }
         };
         fit_canvas(doc);
         *active = Some(nid);
@@ -711,7 +718,9 @@ fn reorder_page(s: &mut Session, p: &Value) -> Result<Value> {
     let d = s.active().ok_or(EngineError::NoDocument)?;
     let positions: Vec<usize> = d.doc.layers.iter().enumerate().filter(|(_, layer)| layer.artboard().is_some()).map(|(i, _)| i).collect();
     let index = positions.iter().position(|i| d.doc.layers[*i].id == id).ok_or_else(|| bad(cmd, "the layer is not a top-level page"))?;
-    let other = if step == "next" { index.checked_add(1).filter(|i| *i < positions.len()) } else { index.checked_sub(1) };
+    // Root layers are bottom-to-top; the Pages panel and PDF export are top-to-bottom.
+    // "previous" means a higher root index and "next" a lower one.
+    let other = if step == "previous" { index.checked_add(1).filter(|i| *i < positions.len()) } else { index.checked_sub(1) };
     let Some(other) = other else { return Ok(json!({"moved": false})) };
     s.edit("Reorder Page", |doc, _| {
         doc.layers.swap(positions[index], positions[other]);
@@ -780,7 +789,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "layer.artboard.addBeside",
             "Add Artboard Beside",
             &[],
-            r##"{"layer":id? (default: the active artboard),"side":"left|right|top|bottom"="right","duplicate":bool=false (copy the board with its contents instead of an empty one)} → {layer, rect} (the Artboard tool's "+" buttons: same size, a 100 px gap away, past any board in the way)"##,
+            r##"{"layer":id? (default: the active artboard),"side":"left|right|top|bottom"="right","duplicate":bool=false (copy contents), "pageOrder":"before|after"? (Multipage order; default retains legacy stacking)} → {layer, rect} (the Artboard tool's "+" buttons: same size, a 100 px gap away, past any board in the way)"##,
             has_active_artboard,
             add_beside
         ),
