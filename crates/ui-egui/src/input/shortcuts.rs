@@ -890,6 +890,19 @@ fn handle_escape_and_view_keys(app: &mut PhotocraftApp, ctx: &egui::Context) {
     crate::opacity_keys::handle(app, ctx);
 }
 
+#[cfg(test)]
+#[test]
+fn multipage_align_shortcut_mapping() {
+    assert_eq!(multipage_align_command(Key::P), Some(&["horizontalCenters", "verticalCenters"][..]));
+    assert_eq!(multipage_align_command(Key::L), Some(&["leftEdges"][..]));
+    assert_eq!(multipage_align_command(Key::R), Some(&["rightEdges"][..]));
+    assert_eq!(multipage_align_command(Key::T), Some(&["topEdges"][..]));
+    assert_eq!(multipage_align_command(Key::B), Some(&["bottomEdges"][..]));
+    assert_eq!(multipage_align_command(Key::C), Some(&["horizontalCenters"][..]));
+    assert_eq!(multipage_align_command(Key::E), Some(&["verticalCenters"][..]));
+    assert_eq!(multipage_align_command(Key::F), None);
+}
+
 /// CorelDRAW-style alignment commands for the Multipage workspace only.
 fn multipage_align_command(key: Key) -> Option<&'static [&'static str]> {
     Some(match key {
