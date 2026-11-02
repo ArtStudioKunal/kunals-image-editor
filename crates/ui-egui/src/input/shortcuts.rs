@@ -929,7 +929,10 @@ fn multipage_align_keys(app: &mut PhotocraftApp, ctx: &egui::Context) -> bool {
         let mut found = None;
         input.events.retain(|event| {
             if let egui::Event::Key { key, pressed: true, repeat: false, modifiers, .. } = event
-                && !modifiers.alt && !modifiers.command && !modifiers.ctrl && !modifiers.shift
+                && !modifiers.alt
+                && !modifiers.command
+                && !modifiers.ctrl
+                && !modifiers.shift
                 && multipage_align_command(*key).is_some()
             {
                 found = Some(*key);
