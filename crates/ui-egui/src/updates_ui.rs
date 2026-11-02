@@ -170,6 +170,8 @@ mod tests {
     #[test]
     fn automatic_check_runs_once_per_launch_even_after_days_or_preference_changes() {
         let (mut app, calls, sender) = app();
+        assert!(!app.session.prefs().general.automatically_check_updates);
+        app.session.edit_prefs(|p| p.general.automatically_check_updates = true);
         let ctx = egui::Context::default();
         at(&mut app, &ctx, 0.0);
         at(&mut app, &ctx, 1.0);
@@ -185,6 +187,7 @@ mod tests {
         at(&mut app, &ctx, 172800.0);
         assert_eq!(*calls.lock().unwrap(), 1, "no periodic checks or preference-triggered rechecks");
         let (mut restarted, restarted_calls, _) = self::app();
+        restarted.session.edit_prefs(|p| p.general.automatically_check_updates = true);
         at(&mut restarted, &ctx, 0.0);
         assert_eq!(*restarted_calls.lock().unwrap(), 1, "the next launch checks again");
     }
@@ -200,6 +203,7 @@ mod tests {
         assert_eq!(*calls.lock().unwrap(), 0, "opt-out is evaluated at startup");
 
         let (mut failed, calls, sender) = app();
+        failed.session.edit_prefs(|p| p.general.automatically_check_updates = true);
         at(&mut failed, &ctx, 0.0);
         sender.lock().unwrap().as_ref().unwrap().send(Err("offline".into())).unwrap();
         at(&mut failed, &ctx, 1.0);
@@ -229,6 +233,7 @@ mod tests {
     #[test]
     fn available_release_notifies_once_even_when_automation_polls_first() {
         let (mut app, _, sender) = app();
+        app.session.edit_prefs(|p| p.general.automatically_check_updates = true);
         let ctx = egui::Context::default();
         at(&mut app, &ctx, 0.0);
         sender
@@ -250,6 +255,7 @@ mod tests {
     #[cfg(not(target_arch = "wasm32"))]
     fn startup_update_prompt_appears_and_can_be_dismissed() {
         let (mut app, _, sender) = app();
+        app.session.edit_prefs(|p| p.general.automatically_check_updates = true);
         let ctx = egui::Context::default();
         at(&mut app, &ctx, 0.0);
         sender
