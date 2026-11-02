@@ -684,6 +684,42 @@ fn artboards_to_pdf(s: &mut Session, p: &Value) -> Result<Value> {
     Ok(json!({"path": path, "pages": pages.len()}))
 }
 
+/// Delete one top-level page/artboard, preserving the other pages and undo history.
+fn delete_page(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "multipage.page.delete";
+    let id = p.get("layer").and_then(Value::as_u64).map(LayerId).or_else(|| active_artboard(s)).ok_or_else(|| bad(cmd, "select a page"))?;
+    let d = s.active().ok_or(EngineError::NoDocument)?;
+    if !d.doc.layers.iter().any(|layer| layer.id == id && layer.artboard().is_some()) {
+        return Err(bad(cmd, "the specified layer is not a top-level page"));
+    }
+    s.edit("Delete Page", |doc, active| {
+        doc.layers.retain(|layer| layer.id != id);
+        *active = doc.layers.iter().find(|layer| layer.artboard().is_some()).map(|layer| layer.id);
+        Ok(())
+    })?;
+    Ok(json!({"deleted": id.0}))
+}
+
+/// Reorder the top-level page stack without changing its canvas coordinates.
+fn reorder_page(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "multipage.page.reorder";
+    let id = p.get("layer").and_then(Value::as_u64).map(LayerId).or_else(|| active_artboard(s)).ok_or_else(|| bad(cmd, "select a page"))?;
+    let step = p.get("step").and_then(Value::as_str).unwrap_or("next");
+    if step != "next" && step != "previous" {
+        return Err(bad(cmd, "step must be next or previous"));
+    }
+    let d = s.active().ok_or(EngineError::NoDocument)?;
+    let positions: Vec<usize> = d.doc.layers.iter().enumerate().filter(|(_, layer)| layer.artboard().is_some()).map(|(i, _)| i).collect();
+    let index = positions.iter().position(|i| d.doc.layers[*i].id == id).ok_or_else(|| bad(cmd, "the layer is not a top-level page"))?;
+    let other = if step == "next" { index.checked_add(1).filter(|i| *i < positions.len()) } else { index.checked_sub(1) };
+    let Some(other) = other else { return Ok(json!({"moved": false})) };
+    s.edit("Reorder Page", |doc, _| {
+        doc.layers.swap(positions[index], positions[other]);
+        Ok(())
+    })?;
+    Ok(json!({"moved": true, "layer": id.0}))
+}
+
 pub fn specs() -> Vec<CommandSpec> {
     macro_rules! spec {
         ($id:expr, $label:expr, $menu:expr, $params:expr, $enabled:expr, $run:expr) => {
@@ -691,6 +727,22 @@ pub fn specs() -> Vec<CommandSpec> {
         };
     }
     vec![
+        spec!(
+            "multipage.page.delete",
+            "Delete Page",
+            &[],
+            r##"{"layer":id?} → {deleted}"##,
+            has_active_artboard,
+            delete_page
+        ),
+        spec!(
+            "multipage.page.reorder",
+            "Reorder Page",
+            &[],
+            r##"{"layer":id?,"step":"previous|next"="next"} → {moved,layer?}"##,
+            has_active_artboard,
+            reorder_page
+        ),
         spec!(
             "layer.new.artboard",
             "Artboard…",
