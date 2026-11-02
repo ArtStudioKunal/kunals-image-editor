@@ -117,6 +117,61 @@ pub(super) fn layers(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     let selection = st.selected_layers();
     let isolated = st.isolated_layers.clone();
     let mut actions: Vec<(String, Value)> = Vec::new();
+    // Multipage uses persistent artboards as pages. Keep controls beside the
+    // existing Layers tree so page selection and layer editing stay in sync.
+    if app.ui.workspace == "Multipage" {
+        let boards: Vec<_> = doc.layers.iter().filter_map(|layer| layer.artboard().map(|board| (layer.id, layer.name.clone(), board.rect))).collect();
+        let selected = active.and_then(|id| doc.artboard_of(id));
+        ui.heading("Pages");
+        ui.horizontal_wrapped(|ui| {
+            if ui.button("+ Page").clicked() {
+                actions.push(if let Some(id) = selected {
+                    ("layer.artboard.addBeside".into(), json!({"layer": id.0, "side": "right"}))
+                } else {
+                    ("layer.new.artboard".into(), json!({"background": "white"}))
+                });
+            }
+            if ui.add_enabled(selected.is_some(), egui::Button::new("Duplicate")).clicked()
+                && let Some(id) = selected
+            {
+                actions.push(("layer.artboard.addBeside".into(), json!({"layer": id.0, "side": "right", "duplicate": true})));
+            }
+            if ui.add_enabled(selected.is_some(), egui::Button::new("Delete")).clicked()
+                && let Some(id) = selected
+            {
+                actions.push(("multipage.page.delete".into(), json!({"layer": id.0})));
+            }
+        });
+        ui.horizontal_wrapped(|ui| {
+            if ui.add_enabled(selected.is_some(), egui::Button::new("Move Earlier")).clicked()
+                && let Some(id) = selected
+            {
+                actions.push(("multipage.page.reorder".into(), json!({"layer": id.0, "step": "previous"})));
+            }
+            if ui.add_enabled(selected.is_some(), egui::Button::new("Move Later")).clicked()
+                && let Some(id) = selected
+            {
+                actions.push(("multipage.page.reorder".into(), json!({"layer": id.0, "step": "next"})));
+            }
+        });
+        for (index, (id, name, rect)) in boards.iter().enumerate() {
+            let is_selected = selected == Some(*id);
+            ui.horizontal(|ui| {
+                // A page-preview tile uses page geometry rather than a potentially
+                // expensive full document render on every panel frame.
+                let (tile, _) = ui.allocate_exact_size(egui::vec2(30.0, 38.0), egui::Sense::hover());
+                let painter = ui.painter();
+                painter.rect_filled(tile.shrink(2.0), 2.0, egui::Color32::WHITE);
+                painter.rect_stroke(tile.shrink(2.0), 2.0, egui::Stroke::new(1.0, if is_selected { egui::Color32::LIGHT_BLUE } else { egui::Color32::GRAY }), egui::StrokeKind::Inside);
+                let label = format!("{} · {} ({} × {})", index + 1, name, rect.width(), rect.height());
+                if ui.selectable_label(is_selected, label).clicked() {
+                    actions.push(("layer.select".into(), json!({"layer": id.0})));
+                }
+            });
+        }
+        ui.separator();
+    }
+
 
     let t = Tokens::get(ui.ctx());
     app.reorder_preview_hit = false;
