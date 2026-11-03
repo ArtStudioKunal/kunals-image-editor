@@ -280,6 +280,23 @@ mod tests {
     }
 
     #[test]
+    fn multipage_layout_json_is_backward_compatible_with_legacy_artboards() {
+        let legacy = Artboard::new(Rect::new(0, 0, 100, 80));
+        let encoded = serde_json::to_value(&legacy).unwrap();
+        assert!(encoded.get("page").is_none(), "legacy artboards should not gain new metadata");
+        let decoded: Artboard = serde_json::from_value(encoded).unwrap();
+        assert_eq!(decoded, legacy);
+
+        let page = Artboard {
+            page: Some(PageLayout { margins: [3, 4, 5, 6], bleed: [2; 4] }),
+            ..legacy
+        };
+        let saved = serde_json::to_value(&page).unwrap();
+        let restored: Artboard = serde_json::from_value(saved).unwrap();
+        assert_eq!(restored, page);
+    }
+
+    #[test]
     fn artboards_listed_and_found() {
         let mut d = doc();
         let child = Layer::raster("in", PixelFormat::RGBA8);
