@@ -114,11 +114,7 @@ mod tests {
     fn link_commands_open_their_urls() {
         let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), Default::default());
         let ctx = egui::Context::default();
-        for (id, url) in [
-            ("help.discord", GITHUB),
-            ("help.website", GITHUB),
-            ("help.github", GITHUB),
-        ] {
+        for (id, url) in [("help.discord", GITHUB), ("help.website", GITHUB), ("help.github", GITHUB)] {
             let r = crate::menus::invoke(&mut app, &ctx, id, serde_json::json!({})).unwrap();
             assert_eq!(r["url"], url);
             assert_eq!(app.ui.status, format!("Opened {url}"));
