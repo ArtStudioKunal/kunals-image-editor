@@ -41,11 +41,11 @@ pub struct Clip {
 /// (#2670), so Paste recreates it instead of its pixels. Fill and adjustment layers have no
 /// pixels of their own, so they are taken whole too rather than refused (#2344). Pixel layers
 /// still copy their pixels; several selected layers are [`multi_copy_ids`].
-fn takes_whole(d: &crate::DocState, id: LayerId) -> bool {
+fn takes_whole(d: &crate::DocState, id: LayerId, preserve_layers: bool) -> bool {
     d.doc.selection.is_none()
         && d.selected_layers().len() <= 1
         && crate::layer_copy_cmds::layered(d.doc.mode)
-        && d.doc.layer(id).is_some_and(|l| !matches!(l.content, LayerContent::Raster(_)))
+        && d.doc.layer(id).is_some_and(|l| preserve_layers || !matches!(l.content, LayerContent::Raster(_)))
 }
 
 /// A scratch document in the source's colour, to hold copied layers.
@@ -99,8 +99,8 @@ fn copy_linked_sources(source: &Document, copies: &mut Document) -> Result<()> {
 
 /// The layer Copy takes whole ([`takes_whole`]): a scratch document in the source's colour
 /// holding it.
-fn whole_layer(d: &crate::DocState, id: LayerId) -> Option<Box<Document>> {
-    let l = d.doc.layer(id).filter(|_| takes_whole(d, id))?;
+fn whole_layer(d: &crate::DocState, id: LayerId, preserve_layers: bool) -> Option<Box<Document>> {
+    let l = d.doc.layer(id).filter(|_| takes_whole(d, id, preserve_layers))?;
     let mut copies = scratch_doc(&d.doc);
     copies.layers.push(l.clone());
     Some(Box::new(copies))
@@ -171,7 +171,7 @@ fn can_copy(s: &Session) -> std::result::Result<(), String> {
     if crate::channel_clip::copies_alpha_channel(s) || s.active().is_some_and(|d| !multi_copy_ids(d).is_empty()) {
         return Ok(());
     }
-    has_layer_pixels(s).or_else(|e| s.active().and_then(|d| d.active_layer.filter(|id| takes_whole(d, *id))).map(|_| ()).ok_or(e))
+    has_layer_pixels(s).or_else(|e| s.active().and_then(|d| d.active_layer.filter(|id| takes_whole(d, *id, false))).map(|_| ()).ok_or(e))
 }
 
 fn has_clip(s: &Session) -> std::result::Result<(), String> {
@@ -268,7 +268,7 @@ fn merged_surface(doc: &Document) -> Surface {
     photocraft_compose::flatten_to_surface(doc, PixelFormat::new(fmt.mode, fmt.sample, true), None)
 }
 
-fn copy(s: &mut Session, merged: bool) -> Result<Value> {
+fn copy(s: &mut Session, merged: bool, preserve_layers: bool) -> Result<Value> {
     let d = s.active().ok_or(EngineError::NoDocument)?;
     let canvas = d.doc.bounds();
     let clip = if merged {
@@ -276,12 +276,17 @@ fn copy(s: &mut Session, merged: bool) -> Result<Value> {
     } else {
         let id = d.active_layer.ok_or(EngineError::Other("no active layer".into()))?;
         let several = multi_copy_ids(d);
-        let mut layers = if several.is_empty() { whole_layer(d, id) } else { whole_layers(d, &several) };
+        let mut layers = if several.is_empty() { whole_layer(d, id, preserve_layers) } else { whole_layers(d, &several) };
         if let Some(copies) = &mut layers {
             copy_linked_sources(&d.doc, copies)?;
         }
         match (d.doc.layer(id).and_then(Layer::surface).filter(|_| several.is_empty()), &layers) {
-            (Some(surf), _) => Clip { layers, ..lift(surf, d.doc.selection.as_ref(), canvas)? },
+            (Some(surf), _) => {
+                // In Multipage, native raster layers may extend beyond any page.
+                // Retain off-page tiles rather than clipping the copy to the canvas.
+                let area = if preserve_layers && layers.is_some() && d.doc.selection.is_none() { surf.content_bounds() } else { canvas };
+                Clip { layers, ..lift(surf, d.doc.selection.as_ref(), area)? }
+            },
             // A group or fill layer has no pixels of its own: the clipboard pixels are what it
             // shows. Adjustment layers show nothing by themselves, so their clip spans the canvas
             // they apply to: Paste places them as a full-canvas layer, and the UI still mirrors
@@ -1024,7 +1029,7 @@ pub fn specs() -> Vec<CommandSpec> {
             if let Some(k) = crate::channel_clip::paste_color_target(s, p) {
                 return crate::channel_clip::cut(s, id, k);
             }
-            let r = copy(s, false)?;
+            let r = copy(s, false, false)?;
             let bg = s.tools.background;
             s.edit("Cut Pixels", |doc, _| clear_selected(doc, id, bg))?;
             Ok(r)
@@ -1034,7 +1039,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Copy",
             &["Edit"],
             Some("Cmd+C"),
-            r##"{"target":"mask|filterMask"? = the targeted mask, copied as grayscale (#2928)} (a targeted colour or alpha channel copies that channel, as grayscale)"##,
+            r##"{"target":"mask|filterMask"? = the targeted mask, copied as grayscale; "preserveLayers":bool=false (Multipage: copy a whole raster layer, including off-page tiles)}"##,
             can_copy,
             |s, p| {
                 if crate::commands::is_mask_target(p) {
@@ -1042,11 +1047,11 @@ pub fn specs() -> Vec<CommandSpec> {
                 }
                 match crate::channel_clip::copy(s)? {
                     Some(r) => Ok(r),
-                    None => copy(s, false),
+                    None => copy(s, false, p.get("preserveLayers").and_then(Value::as_bool) == Some(true)),
                 }
             }
         ),
-        spec!("edit.copyMerged", "Copy Merged", &["Edit"], Some("Cmd+Shift+C"), "{}", has_doc, |s, _| copy(s, true)),
+        spec!("edit.copyMerged", "Copy Merged", &["Edit"], Some("Cmd+Shift+C"), "{}", has_doc, |s, _| copy(s, true, false)),
         spec!(
             "edit.paste",
             "Paste",
