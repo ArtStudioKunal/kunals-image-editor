@@ -14,7 +14,7 @@ Current progress: existing artboards are reused as initial page primitives. A ba
 - Persist ordered pages with stable IDs, page dimensions, margins, bleed, optional facing-page arrangement, and page-specific object associations.
 - Provide an editable pasteboard beyond pages. Off-page objects remain visible, selectable, transformable, and saved with the document, but are excluded from PDF output unless intersecting the exported page or bleed.
 - Test hit-testing and rendering at negative canvas coordinates; no destructive clipping when objects leave a page.
-- Rendered content thumbnails, editable page names, and durable page-specific properties remain. Basic insertion before/after, geometry preview tiles, duplicate/delete/reorder, and page selection are present on the development branch.
+- Rendered content thumbnails, durable margins/bleed metadata, and independent page positioning remain. Basic insertion before/after, geometry preview tiles, duplicate/delete/reorder, page selection, rename actions, rotate controls, and print-DPI-sized A4/A3/US Letter presets are present on the development branch.
 - Distinguish page position (within page) from workspace placement (where each page appears on pasteboard).
 
 ## Keyboard behavior to verify with owner
