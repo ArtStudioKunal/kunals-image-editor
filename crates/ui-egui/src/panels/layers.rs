@@ -6,6 +6,30 @@ use super::layer_row::{RowSel, layer_row};
 use super::options_bar::{LAYER_PCT_W, body_text_width, pct_action, scrub_pct_label};
 use super::{BlendMode, Layer, LayerId, MaskKind, PhotocraftApp, Rect, Sense, Tokens, Value, empty, icons, json, label, pos2, theme, vec2, widgets};
 
+
+/// Convert physical page dimensions (millimetres) to document pixels using the
+/// document's actual PPI. Artboard dimensions are pixels, not PDF points:
+/// using 595×842 for A4 at 300 PPI would print a page much smaller than A4.
+fn print_page_pixels(mm_width: f64, mm_height: f64, dpi: f32) -> Option<(u32, u32)> {
+    if !dpi.is_finite() || dpi <= 0.0 || !mm_width.is_finite() || !mm_height.is_finite() {
+        return None;
+    }
+    let axis = |mm: f64| {
+        let px = (mm * f64::from(dpi) / 25.4).round();
+        if px >= 1.0 && px <= 300_000.0 { Some(px as u32) } else { None }
+    };
+    Some((axis(mm_width)?, axis(mm_height)?))
+}
+
+#[cfg(test)]
+#[test]
+fn print_page_presets_respect_document_dpi() {
+    assert_eq!(print_page_pixels(210.0, 297.0, 300.0), Some((2480, 3508)));
+    assert_eq!(print_page_pixels(215.9, 279.4, 72.0), Some((612, 792)));
+    assert_eq!(print_page_pixels(210.0, 297.0, 0.0), None);
+    assert_eq!(print_page_pixels(210.0, 297.0, f32::NAN), None);
+}
+
 // ----------------------------------------------------------------------------- layers
 
 /// The simple themes' single lock button. On the Background it converts the layer to a normal
@@ -155,6 +179,41 @@ pub(super) fn layers(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                 actions.push(("multipage.page.reorder".into(), json!({"layer": id.0, "step": "next"})));
             }
         });
+        if let Some(id) = selected {
+            if let Some(layer) = doc.layer(id)
+                && let Some(page) = layer.artboard()
+            {
+                ui.horizontal_wrapped(|ui| {
+                    ui.label(format!("{} × {} px", page.rect.width(), page.rect.height()));
+                    if ui.small_button("Rotate Page").on_hover_text("Swap page width and height without moving its origin").clicked() {
+                        actions.push(("layer.artboard.set".into(), json!({"layer": id.0, "width": page.rect.height(), "height": page.rect.width()})));
+                    }
+                    ui.menu_button("Page Size", |ui| {
+                        for (label, width_mm, height_mm) in [
+                            ("A4 portrait", 210.0, 297.0),
+                            ("A4 landscape", 297.0, 210.0),
+                            ("A3 portrait", 297.0, 420.0),
+                            ("A3 landscape", 420.0, 297.0),
+                            ("US Letter portrait", 215.9, 279.4),
+                            ("US Letter landscape", 279.4, 215.9),
+                        ] {
+                            if let Some((width, height)) = print_page_pixels(width_mm, height_mm, doc.resolution_dpi)
+                                && ui.button(label).clicked()
+                            {
+                                actions.push(("layer.artboard.set".into(), json!({"layer": id.0, "width": width, "height": height})));
+                                ui.close();
+                            }
+                        }
+                    });
+                    if ui.small_button("Rename Page").clicked()
+                        && let Some(done) = crate::layer_row_ui::start_rename(ui.ctx(), id.0, &layer.name)
+                    {
+                        actions.push(done);
+                    }
+                });
+                ui.label(format!("Print resolution: {} PPI", doc.resolution_dpi));
+            }
+        }
         for (index, (id, name, rect)) in boards.iter().enumerate() {
             let is_selected = selected == Some(*id);
             ui.horizontal(|ui| {
@@ -170,8 +229,17 @@ pub(super) fn layers(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                     egui::StrokeKind::Inside,
                 );
                 let label = format!("{} · {} ({} × {})", index + 1, name, rect.width(), rect.height());
-                if ui.selectable_label(is_selected, label).clicked() {
+                let row = ui.selectable_label(is_selected, label);
+                if row.clicked() {
                     actions.push(("layer.select".into(), json!({"layer": id.0})));
+                }
+                if row.double_clicked()
+                    && let Some(done) = crate::layer_row_ui::start_rename(ui.ctx(), id.0, name)
+                {
+                    actions.push(done);
+                }
+                if let Some(done) = crate::layer_row_ui::rename_field(ui, id.0, row.rect) {
+                    actions.push(done);
                 }
             });
         }
