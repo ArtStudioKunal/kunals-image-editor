@@ -122,7 +122,15 @@ jobs:
           EVENT: ${{ github.event_name }}
           BASE: ${{ github.event.pull_request.base.sha }}
           FULL: ${{ contains(github.event.pull_request.labels.*.name, 'full-ci') }}
+          HEAD_REF: ${{ github.head_ref }}
         run: |
+          # Defer Windows compilation during KimagePro multipage development.
+          # A full-ci label or a manual CI dispatch still exercises Windows.
+          if [ "$EVENT" = pull_request ] && [ "$HEAD_REF" = feature/multipage-foundation ] && [ "$FULL" != true ]; then
+            echo "windows=false" >> "$GITHUB_OUTPUT"
+            echo "web=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           if [ "$EVENT" != pull_request ] || [ "$FULL" = true ]; then
             echo "windows=true" >> "$GITHUB_OUTPUT"
             echo "web=true" >> "$GITHUB_OUTPUT"

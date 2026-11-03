@@ -786,8 +786,12 @@ fn image_assets_keep_full_artboards() {
         let fmt = doc.pixel_format();
         let mut logo = Layer::raster("logo.png", fmt);
         logo.surface_mut().unwrap().fill_rect(Rect::new(12, 10, 20, 16), &photocraft_raster::from_rgba(&fmt, [1.0, 0.0, 0.0, 1.0]));
-        let board =
-            photocraft_doc::Artboard { rect: Rect::new(4, 6, 44, 36), background: photocraft_doc::ArtboardBackground::Transparent, preset: String::new() };
+        let board = photocraft_doc::Artboard {
+            rect: Rect::new(4, 6, 44, 36),
+            background: photocraft_doc::ArtboardBackground::Transparent,
+            preset: String::new(),
+            page: None,
+        };
         let group = photocraft_doc::Group { children: vec![logo], expanded: true, artboard: Some(board), frame_stroke: None };
         doc.layers = vec![Layer::new("board.png", LayerContent::Group(group))];
         Ok(())
@@ -825,6 +829,7 @@ fn image_assets_refuse_empty_artboards() {
             rect: Rect::new(x0, 0, x0 + 20, 20),
             background: photocraft_doc::ArtboardBackground::Transparent,
             preset: String::new(),
+            page: None,
         };
         let empty = photocraft_doc::Group { children: vec![], expanded: true, artboard: Some(board(0)), frame_stroke: None };
         let off = photocraft_doc::Group { children: vec![outside], expanded: true, artboard: Some(board(24)), frame_stroke: None };

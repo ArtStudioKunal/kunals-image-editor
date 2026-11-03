@@ -1,11 +1,8 @@
 name: Build KimagePro (Windows)
 
 on:
+  # Windows executable builds run only when explicitly dispatched, not after every PR edit.
   workflow_dispatch:
-  pull_request:
-    branches:
-      - main
-      - feature/kimagepro-branding-tools
 
 jobs:
   windows-app:
