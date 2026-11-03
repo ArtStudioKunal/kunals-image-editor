@@ -22,7 +22,7 @@ pub const UPDATE_APP: craft_update::app::App = craft_update::app::App {
     developer: "ArtStudioKunal",
 };
 
-#[cfg(test)]
+#[cfg(all(test, not(target_arch = "wasm32")))]
 #[test]
 fn update_identity_is_only_kimagepro() {
     assert_eq!(UPDATE_APP.id, "kimagepro");
