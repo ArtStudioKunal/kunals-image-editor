@@ -60,7 +60,8 @@ fn multipage_native_copy_paste_keeps_off_page_raster_pixels_and_layer_identity()
         l.opacity = 0.7;
         l.surface_mut().unwrap().fill_rect(Rect::new(110, 40, 120, 50), &[0.0, 0.0, 1.0, 1.0]);
         Ok(())
-    }).unwrap();
+    })
+    .unwrap();
     let copied = s.execute("edit.copy", json!({"preserveLayers": true})).unwrap();
     assert_eq!(copied["bounds"], json!([10, 10, 110, 40]));
     assert!(s.clipboard.as_ref().unwrap().layers.is_some(), "editable layer is copied, not flattened");
