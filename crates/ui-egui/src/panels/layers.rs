@@ -238,9 +238,9 @@ pub(super) fn layers(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                 {
                     actions.push(done);
                 }
-                if let Some(done) = crate::layer_row_ui::rename_field(ui, id.0, row.rect) {
-                    actions.push(done);
-                }
+                // The existing Layers tree owns the in-place rename field.
+                // Do not draw a second TextEdit for the same layer here: both
+                // would compete for keyboard focus and could end the edit early.
             });
         }
         ui.separator();
