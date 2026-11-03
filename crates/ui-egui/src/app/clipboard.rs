@@ -8,6 +8,18 @@ fn clip_signature(w: u32, h: u32, px: &[u8]) -> u64 {
     sig
 }
 
+/// The system clipboard is a flattened RGBA preview. A sparse pasteboard can
+/// span enormous coordinates without consuming much native tile memory, so
+/// never flatten it into a huge contiguous allocation. Keep the editable
+/// internal clipboard even when an OS preview is skipped.
+const MAX_OS_CLIPBOARD_BYTES: usize = 128 * 1024 * 1024;
+
+fn mirrored_pixel_count(bounds: photocraft_geom::Rect) -> Option<usize> {
+    (bounds.width() as usize)
+        .checked_mul(bounds.height() as usize)
+        .filter(|pixels| pixels.checked_mul(4).is_some_and(|bytes| bytes <= MAX_OS_CLIPBOARD_BYTES))
+}
+
 impl PhotocraftApp {
     /// Mirror the session clipboard onto the OS clipboard (RGBA8).
     pub(super) fn export_os_clipboard(&mut self) {
@@ -20,7 +32,12 @@ impl PhotocraftApp {
         if b.is_empty() {
             return;
         }
-        let mut px = vec![[0u8; 4]; b.width() as usize * b.height() as usize];
+        let Some(pixels) = mirrored_pixel_count(b) else { return };
+        let mut px = Vec::new();
+        if px.try_reserve_exact(pixels).is_err() {
+            return;
+        }
+        px.resize(pixels, [0u8; 4]);
         clip.surface.read_rgba8_into(b, &mut px);
         let bytes: Vec<u8> = px.into_iter().flatten().collect();
         if set(b.width(), b.height(), &bytes).is_ok() {
@@ -79,4 +96,12 @@ impl PhotocraftApp {
         self.clip_unmirrored = false;
         Ok(true)
     }
+}
+
+#[cfg(test)]
+#[test]
+fn sparse_pasteboard_mirror_avoids_oversized_flattening() {
+    use photocraft_geom::Rect;
+    assert_eq!(mirrored_pixel_count(Rect::new(0, 0, 16, 8)), Some(128));
+    assert_eq!(mirrored_pixel_count(Rect::new(0, 0, 250_000, 250_000)), None);
 }
