@@ -206,11 +206,8 @@ fn lift(src: &Surface, sel: Option<&Surface>, canvas: Rect) -> Result<Clip> {
     // Opaque/nonzero-default surfaces and selected regions retain the original
     // full-rectangle traversal so implicit default pixels are never dropped.
     let sparse = sel.is_none() && fmt.alpha && src.default_pixel().iter().all(|v| *v == 0.0);
-    let coords: Box<dyn Iterator<Item = _> + '_> = if sparse {
-        Box::new(src.tiles().map(|(tc, _)| *tc).filter(|tc| !tc.rect().intersect(&area).is_empty()))
-    } else {
-        Box::new(area.tiles())
-    };
+    let coords: Box<dyn Iterator<Item = _> + '_> =
+        if sparse { Box::new(src.tiles().map(|(tc, _)| *tc).filter(|tc| !tc.rect().intersect(&area).is_empty())) } else { Box::new(area.tiles()) };
     let mut shared = Vec::new();
     for tc in coords {
         let tr = tc.rect().intersect(&area);
