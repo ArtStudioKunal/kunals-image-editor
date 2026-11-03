@@ -520,13 +520,18 @@ fn add_beside(s: &mut Session, p: &Value) -> Result<Value> {
             let l = doc.layer_mut(nid).ok_or(EngineError::NoLayer(nid))?;
             crate::commands::translate_layer(&snapshot, l, dx, dy);
             crate::vector_cmds::translate_vectors(&snapshot, l, f64::from(dx), f64::from(dy));
-            if page_order.is_some() && let Some(board) = l.artboard_mut() {
+            if page_order.is_some()
+                && let Some(board) = l.artboard_mut()
+            {
                 board.page = Some(src.page.unwrap_or_default());
             }
             nid
         } else {
             let mut g = Layer::group(next_artboard_name(doc), vec![]);
-            set_artboard(&mut g, Artboard { rect, background: src.background, preset: src.preset.clone(), page: src.page.or_else(|| page_order.map(|_| PageLayout::default())) });
+            set_artboard(
+                &mut g,
+                Artboard { rect, background: src.background, preset: src.preset.clone(), page: src.page.or_else(|| page_order.map(|_| PageLayout::default())) },
+            );
             if page_order == Some("after") { doc.insert_below(Some(id), g) } else { doc.insert_above(Some(id), g) }
         };
         fit_canvas(doc);

@@ -82,7 +82,7 @@ pub fn parse_artboard(data: &[u8]) -> Option<Artboard> {
         _ => ArtboardBackground::White,
     };
     let preset = text(d, "artboardPresetName").unwrap_or_default();
-    Some(Artboard { rect, background, preset })
+    Some(Artboard { rect, background, preset, page: None })
 }
 
 /// Encodes an `artb` block. `guides` are indices into the document's guide list (resource 1032)
@@ -357,12 +357,13 @@ mod tests {
 
     #[test]
     fn artboard_roundtrip() {
-        let a = Artboard { rect: Rect::new(10, 20, 110, 220), background: ArtboardBackground::Custom(Color::rgb(0.2, 0.4, 0.6)), preset: "Web".into() };
+        let a = Artboard { rect: Rect::new(10, 20, 110, 220), background: ArtboardBackground::Custom(Color::rgb(0.2, 0.4, 0.6)), preset: "Web".into(), page: None };
         let b = write_artboard(&a, &[0, 2]);
         assert_eq!(b.len() % 2, 0);
         let back = parse_artboard(&b).unwrap();
         assert_eq!(back.rect, a.rect);
         assert_eq!(back.preset, "Web");
+        assert_eq!(back.page, None, "PSD artboards without KimagePro layout metadata remain legacy artboards");
         let ArtboardBackground::Custom(c) = back.background else { panic!("{back:?}") };
         assert!((c.c[1] - 0.4).abs() < 1e-3);
         for bg in [ArtboardBackground::White, ArtboardBackground::Black, ArtboardBackground::Transparent] {

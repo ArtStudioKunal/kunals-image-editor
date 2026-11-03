@@ -287,10 +287,7 @@ mod tests {
         let decoded: Artboard = serde_json::from_value(encoded).unwrap();
         assert_eq!(decoded, legacy);
 
-        let page = Artboard {
-            page: Some(PageLayout { margins: [3, 4, 5, 6], bleed: [2; 4] }),
-            ..legacy
-        };
+        let page = Artboard { page: Some(PageLayout { margins: [3, 4, 5, 6], bleed: [2; 4] }), ..legacy };
         let saved = serde_json::to_value(&page).unwrap();
         let restored: Artboard = serde_json::from_value(saved).unwrap();
         assert_eq!(restored, page);

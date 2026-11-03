@@ -248,7 +248,6 @@ pub(super) fn layers(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                 });
                 ui.label(format!("Margins {:?} px · Bleed {:?} px", layout.margins, layout.bleed));
             });
-
         }
         for (index, (id, name, rect)) in boards.iter().enumerate() {
             let is_selected = selected == Some(*id);
