@@ -10,8 +10,8 @@ Status: **Early implementation, unmerged**. The built-in **Multipage** workspace
 
 ## Milestone 1: page model and pasteboard
 
-Current progress: existing artboards are reused as initial page primitives. A basic Pages section offers selection, blank creation, duplication, deletion, visual geometry tiles, and reordering; reading order is derived from top-level layer order, including PDF export. True page identity/order metadata, content thumbnails, and page-independent placement have **not** been added.
-- Persist ordered pages with stable IDs, page dimensions, margins, bleed, optional facing-page arrangement, and page-specific object associations.
+Current progress: existing artboards are reused as initial page primitives. A basic Pages section offers selection, blank creation, duplication, deletion, visual geometry tiles, reordering, naming, rotation and DPI-aware physical page presets. Pages now optionally carry native, undoable per-page margins and bleed metadata in document pixels; this is preserved by .pcraft serialization and inherited by page duplication. Reading order is still derived from top-level layer order, including PDF export. A fully independent multipage object model, rendered content thumbnails, editable pasteboard and print-box export remain **unfinished**.
+- **Partial:** Ordered pages use stable layer IDs, persistent artboard dimensions and now native per-page margin/bleed metadata (`multipage.page.setLayout`); .pcraft round-trip and undo are covered. Independent page IDs/order, optional facing-page arrangement and explicit page-to-object associations still need dedicated support.
 - Provide an editable pasteboard beyond pages. Off-page objects remain visible, selectable, transformable, and saved with the document, but are excluded from PDF output unless intersecting the exported page or bleed.
 - Test hit-testing and rendering at negative canvas coordinates; no destructive clipping when objects leave a page.
 - Rendered content thumbnails, durable margins/bleed metadata, and independent page positioning remain. Basic insertion before/after, geometry preview tiles, duplicate/delete/reorder, page selection, rename actions, rotate controls, and print-DPI-sized A4/A3/US Letter presets are present on the development branch.
@@ -28,7 +28,7 @@ The user describes Page Up/Down **creating** pages. Current provisional behavior
 - In Image Editing mode, preserve existing normal paste and keyboard shortcuts.
 
 ## Milestone 3: output
-- Multi-page PDF: ordered pages, correct media/crop/bleed boxes, page dimensions and compression. Preserve document editability in KimagePro's native source.
+- Multi-page PDF: ordered pages and basic physical MediaBox dimensions exist, but correct CropBox/BleedBox/TrimBox and print-content behavior are **not** yet implemented. The new native bleed/margin values do not alter PDF export until this milestone is implemented. Preserve editability in KimagePro's native source.
 - Presentation templates, page numbering, master pages, imposition-ready options and data-driven catalog automation later.
 - Batch exports and social-media presets can reuse document/export infrastructure.
 
