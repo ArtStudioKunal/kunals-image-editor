@@ -149,6 +149,16 @@ impl ArtboardBackground {
     }
 }
 
+/// Print/layout settings attached to an individual Multipage page. Insets are in
+/// native document pixels, ordered [top, right, bottom, left]. This is independent
+/// of the page's position on the larger artboard/pasteboard canvas.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct PageLayout {
+    pub margins: [u32; 4],
+    pub bleed: [u32; 4],
+}
+
 /// An artboard: a top-level group that clips its children to `rect` and paints `background`
 /// behind them (Layer › New › Artboard).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -159,11 +169,14 @@ pub struct Artboard {
     /// Size preset the board was made from ("" = custom).
     #[serde(default)]
     pub preset: String,
+    /// Only populated for Multipage pages; legacy artboards remain unchanged.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub page: Option<PageLayout>,
 }
 
 impl Artboard {
     pub fn new(rect: Rect) -> Self {
-        Self { rect, background: ArtboardBackground::White, preset: String::new() }
+        Self { rect, background: ArtboardBackground::White, preset: String::new(), page: None }
     }
 }
 
