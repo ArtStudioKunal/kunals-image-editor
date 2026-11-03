@@ -702,7 +702,6 @@ fn artboards_to_pdf(s: &mut Session, p: &Value) -> Result<Value> {
     Ok(json!({"path": path, "pages": pages.len()}))
 }
 
-
 fn page_insets_param(p: &Value, key: &str, cmd: &str) -> Result<Option<[u32; 4]>> {
     let Some(value) = p.get(key) else { return Ok(None) };
     let number = |v: &Value| v.as_u64().and_then(|n| u32::try_from(n).ok());
