@@ -15,9 +15,7 @@ fn clip_signature(w: u32, h: u32, px: &[u8]) -> u64 {
 const MAX_OS_CLIPBOARD_BYTES: usize = 128 * 1024 * 1024;
 
 fn mirrored_pixel_count(bounds: photocraft_geom::Rect) -> Option<usize> {
-    (bounds.width() as usize)
-        .checked_mul(bounds.height() as usize)
-        .filter(|pixels| pixels.checked_mul(4).is_some_and(|bytes| bytes <= MAX_OS_CLIPBOARD_BYTES))
+    (bounds.width() as usize).checked_mul(bounds.height() as usize).filter(|pixels| pixels.checked_mul(4).is_some_and(|bytes| bytes <= MAX_OS_CLIPBOARD_BYTES))
 }
 
 impl PhotocraftApp {
