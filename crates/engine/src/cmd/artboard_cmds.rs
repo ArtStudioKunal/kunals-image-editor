@@ -288,10 +288,15 @@ fn new_artboard(s: &mut Session, p: &Value) -> Result<Value> {
         rect_param(&json!({"x": p.get("x"), "y": p.get("y")}), base, cmd)?
     };
     let background = background_param(p, cmd)?.unwrap_or_default();
+    let page = match p.get("page") {
+        None | Some(Value::Bool(false)) => None,
+        Some(Value::Bool(true)) => Some(PageLayout::default()),
+        _ => return Err(bad(cmd, "page must be true or false")),
+    };
     let name = p.get("name").and_then(Value::as_str).filter(|n| !n.is_empty()).map(str::to_string);
     let id = s.edit("New Artboard", |doc, active| {
         let mut g = Layer::group(name.unwrap_or_else(|| next_artboard_name(doc)), vec![]);
-        set_artboard(&mut g, Artboard { rect, background, preset, page: None });
+        set_artboard(&mut g, Artboard { rect, background, preset, page });
         let id = doc.insert_above(None, g);
         fit_canvas(doc);
         *active = Some(id);
@@ -389,6 +394,9 @@ fn set_props(s: &mut Session, p: &Value) -> Result<Value> {
         (base[2], base[3]) = (i64::from(w), i64::from(h));
     }
     let rect = rect_param(p, base, cmd)?;
+    if let Some(page) = old.page {
+        validate_page_layout(cmd, rect, page)?;
+    }
     let background = background_param(p, cmd)?;
     let name = p.get("name").and_then(Value::as_str).map(str::to_string);
     let move_contents = p.get("moveContents").and_then(Value::as_bool).unwrap_or(true);
@@ -512,10 +520,13 @@ fn add_beside(s: &mut Session, p: &Value) -> Result<Value> {
             let l = doc.layer_mut(nid).ok_or(EngineError::NoLayer(nid))?;
             crate::commands::translate_layer(&snapshot, l, dx, dy);
             crate::vector_cmds::translate_vectors(&snapshot, l, f64::from(dx), f64::from(dy));
+            if page_order.is_some() && let Some(board) = l.artboard_mut() {
+                board.page = Some(src.page.unwrap_or_default());
+            }
             nid
         } else {
             let mut g = Layer::group(next_artboard_name(doc), vec![]);
-            set_artboard(&mut g, Artboard { rect, background: src.background, preset: src.preset.clone(), page: src.page });
+            set_artboard(&mut g, Artboard { rect, background: src.background, preset: src.preset.clone(), page: src.page.or_else(|| page_order.map(|_| PageLayout::default())) });
             if page_order == Some("after") { doc.insert_below(Some(id), g) } else { doc.insert_above(Some(id), g) }
         };
         fit_canvas(doc);
@@ -691,6 +702,67 @@ fn artboards_to_pdf(s: &mut Session, p: &Value) -> Result<Value> {
     Ok(json!({"path": path, "pages": pages.len()}))
 }
 
+
+fn page_insets_param(p: &Value, key: &str, cmd: &str) -> Result<Option<[u32; 4]>> {
+    let Some(value) = p.get(key) else { return Ok(None) };
+    let number = |v: &Value| v.as_u64().and_then(|n| u32::try_from(n).ok());
+    let sides = match value {
+        Value::Number(_) => {
+            let n = number(value).ok_or_else(|| bad(cmd, format!("{key} must be a nonnegative whole number of pixels")))?;
+            [n; 4]
+        }
+        Value::Array(a) if a.len() == 4 => {
+            let Some(sides) = a.iter().map(number).collect::<Option<Vec<_>>>() else {
+                return Err(bad(cmd, format!("{key} must contain four nonnegative integer pixel values")));
+            };
+            [sides[0], sides[1], sides[2], sides[3]]
+        }
+        _ => return Err(bad(cmd, format!("{key} must be pixels or [top, right, bottom, left] pixels"))),
+    };
+    Ok(Some(sides))
+}
+
+/// All insets are measured in page pixels (not absolute document/pasteboard
+/// coordinates). Margins must leave a positive content area. Bleed must fit
+/// within the page size, preventing invalid print layouts.
+fn validate_page_layout(cmd: &str, rect: Rect, page: PageLayout) -> Result<()> {
+    let [top, right, bottom, left] = page.margins;
+    if u64::from(left) + u64::from(right) >= rect.width() as u64 || u64::from(top) + u64::from(bottom) >= rect.height() as u64 {
+        return Err(bad(cmd, "page margins must leave a positive printable area"));
+    }
+    if page.bleed.iter().any(|n| *n > rect.width().max(rect.height())) {
+        return Err(bad(cmd, "page bleed cannot exceed the larger page dimension"));
+    }
+    Ok(())
+}
+
+/// Store per-page print insets without changing any canvas geometry or layer
+/// positions. The data lives on the native Artboard (and in .pcraft manifests)
+/// so undo, duplicate, reordering and reopening retain the same settings.
+fn set_page_layout(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "multipage.page.setLayout";
+    let id = p.get("layer").and_then(Value::as_u64).map(LayerId).or_else(|| active_artboard(s)).ok_or_else(|| bad(cmd, "select a page"))?;
+    let st = s.active().ok_or(EngineError::NoDocument)?;
+    if !st.doc.layers.iter().any(|l| l.id == id && l.artboard().is_some()) {
+        return Err(bad(cmd, "the specified layer is not a top-level page"));
+    }
+    let board = st.doc.layer(id).and_then(Layer::artboard).ok_or(EngineError::NoLayer(id))?;
+    let mut layout = board.page.unwrap_or_default();
+    if let Some(margins) = page_insets_param(p, "margins", cmd)? {
+        layout.margins = margins;
+    }
+    if let Some(bleed) = page_insets_param(p, "bleed", cmd)? {
+        layout.bleed = bleed;
+    }
+    validate_page_layout(cmd, board.rect, layout)?;
+    s.edit("Set Page Layout", |doc, _| {
+        let board = doc.layer_mut(id).and_then(Layer::artboard_mut).ok_or(EngineError::NoLayer(id))?;
+        board.page = Some(layout);
+        Ok(())
+    })?;
+    Ok(json!({"layer": id.0, "margins": layout.margins, "bleed": layout.bleed}))
+}
+
 /// Delete one top-level page/artboard, preserving the other pages and undo history.
 fn delete_page(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "multipage.page.delete";
@@ -736,6 +808,14 @@ pub fn specs() -> Vec<CommandSpec> {
         };
     }
     vec![
+        spec!(
+            "multipage.page.setLayout",
+            "Page Margins and Bleed",
+            &[],
+            r##"{"layer":id?,"margins":px|[top,right,bottom,left]?,"bleed":px|[top,right,bottom,left]?} → {layer,margins,bleed} (pixels; saved in native .pcraft)"##,
+            has_active_artboard,
+            set_page_layout
+        ),
         spec!("multipage.page.delete", "Delete Page", &[], r##"{"layer":id?} → {deleted}"##, has_active_artboard, delete_page),
         spec!(
             "multipage.page.reorder",
@@ -749,7 +829,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "layer.new.artboard",
             "Artboard…",
             &["Layer", "New"],
-            r##"{"rect":[x,y,w,h]? | "x","y","width","height"? (default: canvas size, right of the last board),"preset":"iPhone 14|Web 1920|A4|…"?,"name":str?,"background":"white|black|transparent|custom"="white","color":[r,g,b]|"#rrggbb"? (custom)} → {layer, rect}"##,
+            r##"{"rect":[x,y,w,h]? | "x","y","width","height"? (default: canvas size, right of the last board),"preset":"iPhone 14|Web 1920|A4|…"?,"name":str?,"page":bool=false,"background":"white|black|transparent|custom"="white","color":[r,g,b]|"#rrggbb"? (custom)} → {layer, rect}"##,
             has_doc,
             new_artboard
         ),
