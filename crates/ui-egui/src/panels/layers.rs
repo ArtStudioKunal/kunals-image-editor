@@ -15,7 +15,7 @@ fn print_page_pixels(mm_width: f64, mm_height: f64, dpi: f32) -> Option<(u32, u3
     }
     let axis = |mm: f64| {
         let px = (mm * f64::from(dpi) / 25.4).round();
-        if px >= 1.0 && px <= 300_000.0 { Some(px as u32) } else { None }
+        if (1.0..=300_000.0).contains(&px) { Some(px as u32) } else { None }
     };
     Some((axis(mm_width)?, axis(mm_height)?))
 }
@@ -178,40 +178,39 @@ pub(super) fn layers(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                 actions.push(("multipage.page.reorder".into(), json!({"layer": id.0, "step": "next"})));
             }
         });
-        if let Some(id) = selected {
-            if let Some(layer) = doc.layer(id)
-                && let Some(page) = layer.artboard()
-            {
-                ui.horizontal_wrapped(|ui| {
-                    ui.label(format!("{} × {} px", page.rect.width(), page.rect.height()));
-                    if ui.small_button("Rotate Page").on_hover_text("Swap page width and height without moving its origin").clicked() {
-                        actions.push(("layer.artboard.set".into(), json!({"layer": id.0, "width": page.rect.height(), "height": page.rect.width()})));
-                    }
-                    ui.menu_button("Page Size", |ui| {
-                        for (label, width_mm, height_mm) in [
-                            ("A4 portrait", 210.0, 297.0),
-                            ("A4 landscape", 297.0, 210.0),
-                            ("A3 portrait", 297.0, 420.0),
-                            ("A3 landscape", 420.0, 297.0),
-                            ("US Letter portrait", 215.9, 279.4),
-                            ("US Letter landscape", 279.4, 215.9),
-                        ] {
-                            if let Some((width, height)) = print_page_pixels(width_mm, height_mm, doc.resolution_dpi)
-                                && ui.button(label).clicked()
-                            {
-                                actions.push(("layer.artboard.set".into(), json!({"layer": id.0, "width": width, "height": height})));
-                                ui.close();
-                            }
+        if let Some(id) = selected
+            && let Some(layer) = doc.layer(id)
+            && let Some(page) = layer.artboard()
+        {
+            ui.horizontal_wrapped(|ui| {
+                ui.label(format!("{} × {} px", page.rect.width(), page.rect.height()));
+                if ui.small_button("Rotate Page").on_hover_text("Swap page width and height without moving its origin").clicked() {
+                    actions.push(("layer.artboard.set".into(), json!({"layer": id.0, "width": page.rect.height(), "height": page.rect.width()})));
+                }
+                ui.menu_button("Page Size", |ui| {
+                    for (label, width_mm, height_mm) in [
+                        ("A4 portrait", 210.0, 297.0),
+                        ("A4 landscape", 297.0, 210.0),
+                        ("A3 portrait", 297.0, 420.0),
+                        ("A3 landscape", 420.0, 297.0),
+                        ("US Letter portrait", 215.9, 279.4),
+                        ("US Letter landscape", 279.4, 215.9),
+                    ] {
+                        if let Some((width, height)) = print_page_pixels(width_mm, height_mm, doc.resolution_dpi)
+                            && ui.button(label).clicked()
+                        {
+                            actions.push(("layer.artboard.set".into(), json!({"layer": id.0, "width": width, "height": height})));
+                            ui.close();
                         }
-                    });
-                    if ui.small_button("Rename Page").clicked()
-                        && let Some(done) = crate::layer_row_ui::start_rename(ui.ctx(), id.0, &layer.name)
-                    {
-                        actions.push(done);
                     }
                 });
-                ui.label(format!("Print resolution: {} PPI", doc.resolution_dpi));
-            }
+                if ui.small_button("Rename Page").clicked()
+                    && let Some(done) = crate::layer_row_ui::start_rename(ui.ctx(), id.0, &layer.name)
+                {
+                    actions.push(done);
+                }
+            });
+            ui.label(format!("Print resolution: {} PPI", doc.resolution_dpi));
         }
         for (index, (id, name, rect)) in boards.iter().enumerate() {
             let is_selected = selected == Some(*id);
