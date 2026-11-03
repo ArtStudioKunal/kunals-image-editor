@@ -851,3 +851,61 @@ fn multipage_pcraft_round_trip_keeps_page_order_and_properties() {
     );
     let _ = std::fs::remove_file(pdf_path);
 }
+
+#[test]
+fn multipage_layout_is_undoable_validated_and_native_persistent() {
+    let mut s = session(8);
+    let first = s.execute("layer.new.artboard", json!({"rect": [0, 0, 100, 80], "name": "Cover", "page": true})).unwrap();
+    let cover = first["layer"].as_u64().unwrap();
+    assert_eq!(doc(&s).layer(LayerId(cover)).unwrap().artboard().unwrap().page, Some(PageLayout::default()));
+
+    let changed = s.execute("multipage.page.setLayout", json!({"layer": cover, "margins": [4, 5, 6, 7], "bleed": 3})).unwrap();
+    assert_eq!(changed["margins"], json!([4, 5, 6, 7]));
+    assert_eq!(changed["bleed"], json!([3, 3, 3, 3]));
+    let layout = doc(&s).layer(LayerId(cover)).unwrap().artboard().unwrap().page.unwrap();
+    assert_eq!(layout.margins, [4, 5, 6, 7]);
+    assert_eq!(layout.bleed, [3; 4]);
+
+    s.undo();
+    assert_eq!(doc(&s).layer(LayerId(cover)).unwrap().artboard().unwrap().page, Some(PageLayout::default()));
+    s.execute("multipage.page.setLayout", json!({"layer": cover, "margins": [4, 5, 6, 7], "bleed": 3})).unwrap();
+
+    let before = doc(&s).clone();
+    for invalid in [
+        json!({"layer": cover, "margins": [0, 50, 0, 50]}),
+        json!({"layer": cover, "bleed": -1}),
+        json!({"layer": cover, "margins": [1, 2, 3]}),
+        json!({"layer": cover, "margins": [1.5, 0, 0, 0]}),
+        json!({"layer": cover, "bleed": [1, 2, 3, "bad"]}),
+        json!({"layer": 999999_u64, "margins": 1}),
+    ] {
+        assert!(s.execute("multipage.page.setLayout", invalid.clone()).is_err(), "accepted {invalid}");
+        assert_eq!(doc(&s), &before, "rejected page layout changed the document");
+    }
+    assert!(s.execute("layer.artboard.set", json!({"layer": cover, "width": 10})).is_err());
+    assert_eq!(doc(&s), &before, "invalid page resize changed the document");
+
+    let added = s.execute("layer.artboard.addBeside", json!({"layer": cover, "side": "right", "pageOrder": "after", "duplicate": true})).unwrap();
+    let duplicate = added["layer"].as_u64().unwrap();
+    assert_ne!(duplicate, cover);
+    assert_eq!(doc(&s).layer(LayerId(duplicate)).unwrap().artboard().unwrap().page, Some(layout));
+    s.execute("multipage.page.setLayout", json!({"layer": duplicate, "bleed": 1})).unwrap();
+    assert_eq!(doc(&s).layer(LayerId(cover)).unwrap().artboard().unwrap().page, Some(layout));
+
+    let encoded = photocraft_io::export(doc(&s), "layout.pcraft", &photocraft_io::ExportOptions::default()).unwrap();
+    let restored = photocraft_io::import("layout.pcraft", &encoded.bytes).unwrap().document;
+    assert_eq!(restored.layer(LayerId(cover)).unwrap().artboard().unwrap().page, Some(layout));
+    assert_eq!(restored.layer(LayerId(duplicate)).unwrap().artboard().unwrap().page.unwrap().bleed, [1; 4]);
+}
+
+#[test]
+fn multipage_legacy_artboards_are_not_implicitly_converted() {
+    let mut s = session(8);
+    let first = s.execute("layer.new.artboard", json!({"rect": [0, 0, 100, 80]})).unwrap()["layer"].as_u64().unwrap();
+    assert_eq!(doc(&s).layer(LayerId(first)).unwrap().artboard().unwrap().page, None);
+    let second = s.execute("layer.artboard.addBeside", json!({"layer": first, "side": "right", "pageOrder": "after"})).unwrap()["layer"].as_u64().unwrap();
+    assert_eq!(doc(&s).layer(LayerId(first)).unwrap().artboard().unwrap().page, None);
+    assert_eq!(doc(&s).layer(LayerId(second)).unwrap().artboard().unwrap().page, Some(PageLayout::default()));
+    s.execute("multipage.page.setLayout", json!({"layer": first, "margins": 5})).unwrap();
+    assert_eq!(doc(&s).layer(LayerId(first)).unwrap().artboard().unwrap().page.unwrap().margins, [5; 4]);
+}
