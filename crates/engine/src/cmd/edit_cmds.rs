@@ -200,10 +200,19 @@ fn lift(src: &Surface, sel: Option<&Surface>, canvas: Rect) -> Result<Clip> {
     if area.is_empty() {
         return Ok(Clip { surface: out, bounds: Rect::EMPTY, layers: None, resolution: None, source: None });
     }
-    // Only the selected area is read: converting the whole layer (a 24 MP Background gaining
-    // alpha) cost about a second per Layer via Copy (#668).
+    // Sparse transparent pasteboards can contain tiles hundreds of thousands of
+    // pixels apart. Do not enumerate every empty tile in their bounding rectangle:
+    // it can otherwise take minutes or allocate excessive temporary memory.
+    // Opaque/nonzero-default surfaces and selected regions retain the original
+    // full-rectangle traversal so implicit default pixels are never dropped.
+    let sparse = sel.is_none() && fmt.alpha && src.default_pixel().iter().all(|v| *v == 0.0);
+    let coords: Box<dyn Iterator<Item = _> + '_> = if sparse {
+        Box::new(src.tiles().map(|(tc, _)| *tc).filter(|tc| !tc.rect().intersect(&area).is_empty()))
+    } else {
+        Box::new(area.tiles())
+    };
     let mut shared = Vec::new();
-    for tc in area.tiles() {
+    for tc in coords {
         let tr = tc.rect().intersect(&area);
         if fmt.alpha
             && tr == tc.rect()
