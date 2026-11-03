@@ -23,7 +23,7 @@ The user describes Page Up/Down **creating** pages. Current provisional behavior
 ## Milestone 2: object alignment and paste-in-place
 - P centers selection on active page; L/R/T/B and E/C follow CorelDRAW conventions, scoped to Multipage only.
 - Select an explicit alignment reference: page, selection, key object, margins or guides, as supported.
-- Ctrl+C and Ctrl+V between KimagePro documents retain source page-relative physical X/Y positions, transformations, stacking order and relative spacing. Off-page coordinates remain valid.
+- **In progress:** In Multipage, Ctrl+C copies complete native selected layers (single raster layers included, with off-page raster tiles) and Ctrl+V pastes at the original document X/Y position between KimagePro documents. Normal image-editing Paste and external clipboard Paste are unchanged. Regression tests cover off-page native save/reopen and selection-aware copy. Page-relative unit conversions, all vector transforms, and mixed-resolution behavior still require validation.
 - Define behavior for mixed resolution, different units, document size, multi-selection, text layers, and clipboard from other applications.
 - In Image Editing mode, preserve existing normal paste and keyboard shortcuts.
 
