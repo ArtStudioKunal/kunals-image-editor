@@ -83,6 +83,24 @@ fn multipage_native_copy_paste_keeps_off_page_raster_pixels_and_layer_identity()
     assert_eq!(layer.surface().unwrap().rgba(115, 45), [0.0, 0.0, 1.0, 1.0]);
 }
 
+/// Sparse pasteboard artwork may occupy distant native tiles. Copy needs work
+/// proportional to stored tiles, not the area between them.
+#[test]
+fn multipage_copy_sparse_distant_tiles_without_losing_content() {
+    let mut s = session();
+    let id = s.active().unwrap().active_layer.unwrap();
+    s.edit("distant artwork", |doc, _| {
+        doc.layer_mut(id).unwrap().surface_mut().unwrap().fill_rect(Rect::new(250_000, 250_000, 250_001, 250_001), &[0.0, 1.0, 0.0, 1.0]);
+        Ok(())
+    })
+    .unwrap();
+    s.execute("edit.copy", json!({"preserveLayers": true})).unwrap();
+    let clip = s.clipboard.as_ref().unwrap();
+    assert!(clip.layers.is_some(), "native layer must remain editable");
+    assert!(clip.surface.tile_count() <= 4, "a sparse copy must not allocate intervening empty tiles");
+    assert_eq!(clip.surface.rgba(250_000, 250_000), [0.0, 1.0, 0.0, 1.0]);
+}
+
 /// The preserve-layers option is restricted to native objects with no pixel selection.
 /// A normal pixel-selection copy still makes a pixel clipboard as before.
 #[test]
