@@ -20,6 +20,15 @@ fn print_page_pixels(mm_width: f64, mm_height: f64, dpi: f32) -> Option<(u32, u3
     Some((axis(mm_width)?, axis(mm_height)?))
 }
 
+/// Convert a nonnegative millimetre margin/bleed to document pixels.
+fn print_inset_pixels(mm: f64, dpi: f32) -> Option<u32> {
+    if !mm.is_finite() || !dpi.is_finite() || dpi <= 0.0 {
+        return None;
+    }
+    let px = (mm * f64::from(dpi) / 25.4).round();
+    (0.0..=300_000.0).contains(&px).then_some(px as u32)
+}
+
 #[cfg(test)]
 #[test]
 fn print_page_presets_respect_document_dpi() {
@@ -27,6 +36,9 @@ fn print_page_presets_respect_document_dpi() {
     assert_eq!(print_page_pixels(215.9, 279.4, 72.0), Some((612, 792)));
     assert_eq!(print_page_pixels(210.0, 297.0, 0.0), None);
     assert_eq!(print_page_pixels(210.0, 297.0, f32::NAN), None);
+    assert_eq!(print_inset_pixels(3.0, 300.0), Some(35));
+    assert_eq!(print_inset_pixels(0.0, 72.0), Some(0));
+    assert_eq!(print_inset_pixels(-3.0, 300.0), None);
 }
 
 // ----------------------------------------------------------------------------- layers
@@ -152,7 +164,7 @@ pub(super) fn layers(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                 actions.push(if let Some(id) = selected {
                     ("layer.artboard.addBeside".into(), json!({"layer": id.0, "side": "right", "pageOrder": "after"}))
                 } else {
-                    ("layer.new.artboard".into(), json!({"background": "white"}))
+                    ("layer.new.artboard".into(), json!({"background": "white", "page": true}))
                 });
             }
             if ui.add_enabled(selected.is_some(), egui::Button::new("Duplicate")).clicked()
@@ -211,6 +223,32 @@ pub(super) fn layers(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                 }
             });
             ui.label(format!("Print resolution: {} PPI", doc.resolution_dpi));
+            let layout = page.page.unwrap_or_default();
+            ui.horizontal_wrapped(|ui| {
+                ui.menu_button("Margins", |ui| {
+                    for (label, mm) in [("None", 0.0), ("5 mm", 5.0), ("10 mm", 10.0), ("15 mm", 15.0), ("20 mm", 20.0)] {
+                        if let Some(px) = print_inset_pixels(mm, doc.resolution_dpi) {
+                            let allowed = u64::from(px) * 2 < page.rect.width() as u64 && u64::from(px) * 2 < page.rect.height() as u64;
+                            if ui.add_enabled(allowed, egui::Button::new(label)).clicked() {
+                                actions.push(("multipage.page.setLayout".into(), json!({"layer": id.0, "margins": px})));
+                                ui.close();
+                            }
+                        }
+                    }
+                });
+                ui.menu_button("Bleed", |ui| {
+                    for (label, mm) in [("None", 0.0), ("3 mm", 3.0), ("5 mm", 5.0), ("7 mm", 7.0)] {
+                        if let Some(px) = print_inset_pixels(mm, doc.resolution_dpi)
+                            && ui.button(label).clicked()
+                        {
+                            actions.push(("multipage.page.setLayout".into(), json!({"layer": id.0, "bleed": px})));
+                            ui.close();
+                        }
+                    }
+                });
+                ui.label(format!("Margins {:?} px · Bleed {:?} px", layout.margins, layout.bleed));
+            });
+
         }
         for (index, (id, name, rect)) in boards.iter().enumerate() {
             let is_selected = selected == Some(*id);
