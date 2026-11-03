@@ -8,7 +8,7 @@
 //! in every direction, like Photoshop's auto-expanding artboard canvas ([`fit_canvas`]).
 
 use photocraft_color::{Color, ColorMode, PixelFormat, SampleType};
-use photocraft_doc::{Artboard, ArtboardBackground, Document, Layer, LayerContent, LayerId, Size};
+use photocraft_doc::{Artboard, ArtboardBackground, Document, Layer, LayerContent, LayerId, PageLayout, Size};
 use photocraft_geom::{Affine, Rect};
 use photocraft_raster::Surface;
 use serde_json::{Value, json};
@@ -245,7 +245,7 @@ pub fn new_artboard_document(name: String, size: Size, mode: ColorMode, depth: S
         Some(c) => ArtboardBackground::Custom(c),
     };
     let mut board = Layer::group("Artboard 1", vec![Layer::raster("Layer 1", doc.pixel_format())]);
-    set_artboard(&mut board, Artboard { rect: doc.bounds(), background, preset: String::new() });
+    set_artboard(&mut board, Artboard { rect: doc.bounds(), background, preset: String::new(), page: None });
     doc.layers.push(board);
     doc
 }
@@ -291,7 +291,7 @@ fn new_artboard(s: &mut Session, p: &Value) -> Result<Value> {
     let name = p.get("name").and_then(Value::as_str).filter(|n| !n.is_empty()).map(str::to_string);
     let id = s.edit("New Artboard", |doc, active| {
         let mut g = Layer::group(name.unwrap_or_else(|| next_artboard_name(doc)), vec![]);
-        set_artboard(&mut g, Artboard { rect, background, preset });
+        set_artboard(&mut g, Artboard { rect, background, preset, page: None });
         let id = doc.insert_above(None, g);
         fit_canvas(doc);
         *active = Some(id);
@@ -312,7 +312,7 @@ fn artboard_from_group(s: &mut Session, p: &Value) -> Result<Value> {
         }
         let l = doc.layer_mut(id).ok_or(EngineError::NoLayer(id))?;
         let rect = crate::layer_multi_cmds::layer_bounds(l).unwrap_or(canvas);
-        set_artboard(l, Artboard { rect, background, preset: String::new() });
+        set_artboard(l, Artboard { rect, background, preset: String::new(), page: None });
         fit_canvas(doc);
         *active = Some(id);
         Ok(rect)
@@ -361,7 +361,7 @@ fn artboard_from_layers(s: &mut Session, p: &Value) -> Result<Value> {
         let [x, y, w, h] = xywh(union_bounds(&children, canvas));
         let rect = board_rect(cmd, [x, y, size[0].unwrap_or(w), size[1].unwrap_or(h)])?;
         let mut g = Layer::group(name.unwrap_or_else(|| next_artboard_name(doc)), children);
-        set_artboard(&mut g, Artboard { rect, background, preset: String::new() });
+        set_artboard(&mut g, Artboard { rect, background, preset: String::new(), page: None });
         let gid = doc.insert_above(None, g);
         crate::layer_multi_cmds::check_group_depth(doc, "Artboard from Layers")?;
         fit_canvas(doc);
@@ -515,7 +515,7 @@ fn add_beside(s: &mut Session, p: &Value) -> Result<Value> {
             nid
         } else {
             let mut g = Layer::group(next_artboard_name(doc), vec![]);
-            set_artboard(&mut g, Artboard { rect, background: src.background, preset: src.preset.clone() });
+            set_artboard(&mut g, Artboard { rect, background: src.background, preset: src.preset.clone(), page: src.page });
             if page_order == Some("after") { doc.insert_below(Some(id), g) } else { doc.insert_above(Some(id), g) }
         };
         fit_canvas(doc);
