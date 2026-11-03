@@ -286,7 +286,7 @@ fn copy(s: &mut Session, merged: bool, preserve_layers: bool) -> Result<Value> {
                 // Retain off-page tiles rather than clipping the copy to the canvas.
                 let area = if preserve_layers && layers.is_some() && d.doc.selection.is_none() { surf.content_bounds() } else { canvas };
                 Clip { layers, ..lift(surf, d.doc.selection.as_ref(), area)? }
-            },
+            }
             // A group or fill layer has no pixels of its own: the clipboard pixels are what it
             // shows. Adjustment layers show nothing by themselves, so their clip spans the canvas
             // they apply to: Paste places them as a full-canvas layer, and the UI still mirrors
