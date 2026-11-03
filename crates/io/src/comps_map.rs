@@ -357,7 +357,8 @@ mod tests {
 
     #[test]
     fn artboard_roundtrip() {
-        let a = Artboard { rect: Rect::new(10, 20, 110, 220), background: ArtboardBackground::Custom(Color::rgb(0.2, 0.4, 0.6)), preset: "Web".into(), page: None };
+        let a =
+            Artboard { rect: Rect::new(10, 20, 110, 220), background: ArtboardBackground::Custom(Color::rgb(0.2, 0.4, 0.6)), preset: "Web".into(), page: None };
         let b = write_artboard(&a, &[0, 2]);
         assert_eq!(b.len() % 2, 0);
         let back = parse_artboard(&b).unwrap();
