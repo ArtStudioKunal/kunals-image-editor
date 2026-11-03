@@ -6,7 +6,6 @@ use super::layer_row::{RowSel, layer_row};
 use super::options_bar::{LAYER_PCT_W, body_text_width, pct_action, scrub_pct_label};
 use super::{BlendMode, Layer, LayerId, MaskKind, PhotocraftApp, Rect, Sense, Tokens, Value, empty, icons, json, label, pos2, theme, vec2, widgets};
 
-
 /// Convert physical page dimensions (millimetres) to document pixels using the
 /// document's actual PPI. Artboard dimensions are pixels, not PDF points:
 /// using 595×842 for A4 at 300 PPI would print a page much smaller than A4.
