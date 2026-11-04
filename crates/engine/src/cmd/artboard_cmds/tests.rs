@@ -903,13 +903,15 @@ fn multipage_explicit_loose_layer_ownership_survives_reorder_save_and_undo() {
     let mut s = session(8);
     let cover = s.execute("layer.new.artboard", json!({"rect": [0, 0, 100, 80], "page": true})).unwrap()["layer"].as_u64().unwrap();
     let second = s.execute("layer.artboard.addBeside", json!({"layer": cover, "side": "right", "pageOrder": "after"})).unwrap()["layer"].as_u64().unwrap();
-    let id = s.edit("Loose object", |doc, _| {
-        let mut layer = Layer::raster("Loose object", doc.pixel_format());
-        layer.surface_mut().unwrap().fill_rect(Rect::new(-20, 5, -4, 20), &[1.0, 0.0, 0.0, 1.0]);
-        let id = layer.id;
-        doc.layers.push(layer);
-        Ok(id)
-    }).unwrap();
+    let id = s
+        .edit("Loose object", |doc, _| {
+            let mut layer = Layer::raster("Loose object", doc.pixel_format());
+            layer.surface_mut().unwrap().fill_rect(Rect::new(-20, 5, -4, 20), &[1.0, 0.0, 0.0, 1.0]);
+            let id = layer.id;
+            doc.layers.push(layer);
+            Ok(id)
+        })
+        .unwrap();
     let owner = |s: &mut Session| s.execute("multipage.page.ownerOf", json!({"layer": id.0})).unwrap()["page"].clone();
     assert_eq!(owner(&mut s), Value::Null);
     s.execute("multipage.page.setOwner", json!({"layer": id.0, "page": cover})).unwrap();
@@ -919,7 +921,9 @@ fn multipage_explicit_loose_layer_ownership_survives_reorder_save_and_undo() {
     s.execute("multipage.page.reorder", json!({"layer": cover, "step": "next"})).unwrap();
     assert_eq!(owner(&mut s), json!(cover), "page ownership follows identity, not visual order");
 
-    let copied = s.execute("layer.artboard.addBeside", json!({"layer": cover, "side": "right", "duplicate": true, "pageOrder": "after"})).unwrap()["layer"].as_u64().unwrap();
+    let copied = s.execute("layer.artboard.addBeside", json!({"layer": cover, "side": "right", "duplicate": true, "pageOrder": "after"})).unwrap()["layer"]
+        .as_u64()
+        .unwrap();
     assert!(doc(&s).layer(LayerId(copied)).unwrap().artboard().unwrap().page.as_ref().unwrap().owned_layers.is_empty());
     assert_eq!(owner(&mut s), json!(cover));
 

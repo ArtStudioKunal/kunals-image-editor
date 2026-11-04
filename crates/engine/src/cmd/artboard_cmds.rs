@@ -523,21 +523,35 @@ fn add_beside(s: &mut Session, p: &Value) -> Result<Value> {
             if page_order.is_some()
                 && let Some(board) = l.artboard_mut()
             {
-                board.page = Some(src.page.clone().map(|mut page| {
-                    // A duplicate must not claim loose artwork belonging to the source page.
-                    page.owned_layers.clear();
-                    page
-                }).unwrap_or_default());
+                board.page = Some(
+                    src.page
+                        .clone()
+                        .map(|mut page| {
+                            // A duplicate must not claim loose artwork belonging to the source page.
+                            page.owned_layers.clear();
+                            page
+                        })
+                        .unwrap_or_default(),
+                );
             }
             nid
         } else {
             let mut g = Layer::group(next_artboard_name(doc), vec![]);
             set_artboard(
                 &mut g,
-                Artboard { rect, background: src.background, preset: src.preset.clone(), page: src.page.clone().map(|mut page| {
-                    page.owned_layers.clear();
-                    page
-                }).or_else(|| page_order.map(|_| PageLayout::default())) },
+                Artboard {
+                    rect,
+                    background: src.background,
+                    preset: src.preset.clone(),
+                    page: src
+                        .page
+                        .clone()
+                        .map(|mut page| {
+                            page.owned_layers.clear();
+                            page
+                        })
+                        .or_else(|| page_order.map(|_| PageLayout::default())),
+                },
             );
             if page_order == Some("after") { doc.insert_below(Some(id), g) } else { doc.insert_above(Some(id), g) }
         };
@@ -782,9 +796,10 @@ fn owner_of(s: &mut Session, p: &Value) -> Result<Value> {
     if !doc.layers.iter().any(|layer| layer.id == id && layer.artboard().is_none()) {
         return Err(bad(cmd, "layer must be an existing loose top-level layer"));
     }
-    let owner = doc.layers.iter().find_map(|layer| {
-        layer.artboard().and_then(|board| board.page.as_ref()).filter(|page| page.owned_layers.contains(&id)).map(|_| layer.id.0)
-    });
+    let owner = doc
+        .layers
+        .iter()
+        .find_map(|layer| layer.artboard().and_then(|board| board.page.as_ref()).filter(|page| page.owned_layers.contains(&id)).map(|_| layer.id.0));
     Ok(json!({"layer": id.0, "page": owner}))
 }
 
@@ -806,9 +821,10 @@ fn set_page_owner(s: &mut Session, p: &Value) -> Result<Value> {
     if owner.is_some_and(|page_id| !doc.layers.iter().any(|layer| layer.id == page_id && layer.artboard().is_some_and(|board| board.page.is_some()))) {
         return Err(bad(cmd, "target must be a Multipage page"));
     }
-    let current = doc.layers.iter().find_map(|layer| {
-        layer.artboard().and_then(|board| board.page.as_ref()).filter(|page| page.owned_layers.contains(&id)).map(|_| layer.id)
-    });
+    let current = doc
+        .layers
+        .iter()
+        .find_map(|layer| layer.artboard().and_then(|board| board.page.as_ref()).filter(|page| page.owned_layers.contains(&id)).map(|_| layer.id));
     if current == owner {
         return Ok(json!({"layer": id.0, "page": owner.map(|page| page.0)}));
     }
