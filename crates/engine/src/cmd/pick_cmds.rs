@@ -435,6 +435,35 @@ mod tests {
         assert!(s.execute("layer.selectInRect", json!({"x": -1e300, "y": 1e300, "width": 1e308, "height": -1e308})).is_ok());
     }
 
+    /// Multipage pasteboard artwork must remain selectable outside the page and
+    /// even outside the document canvas. Moving it onto the page is non-destructive.
+    #[test]
+    fn multipage_off_canvas_layer_can_be_picked_marquee_selected_and_moved_to_page() {
+        let mut s = Session::new();
+        s.execute("file.new", json!({"width": 64, "height": 48})).unwrap();
+        s.execute("layer.new.artboard", json!({"rect": [0, 0, 64, 48], "page": true})).unwrap();
+        let id = s
+            .edit("Stage Artwork on Pasteboard", |doc, _| {
+                let mut layer = photocraft_doc::Layer::raster("Pasteboard artwork", doc.pixel_format());
+                layer.surface_mut().unwrap().fill_rect(Rect::new(-24, 8, -8, 24), &[1.0, 0.0, 0.0, 1.0]);
+                let id = layer.id;
+                doc.layers.push(layer);
+                Ok(id)
+            })
+            .unwrap();
+
+        assert_eq!(s.execute("layer.pickAt", json!({"x": -12, "y": 12, "select": false})).unwrap()["layer"], id.0);
+        let hits = s.execute("layer.selectInRect", json!({"x": -25, "y": 7, "width": 19, "height": 19})).unwrap();
+        assert_eq!(hits["layers"], json!([id.0]));
+        assert_eq!(s.active().unwrap().active_layer, Some(id));
+
+        s.execute("layer.translate", json!({"layer": id.0, "dx": 42, "dy": 0})).unwrap();
+        assert_eq!(s.execute("layer.pickAt", json!({"x": 20, "y": 12, "select": false})).unwrap()["layer"], id.0);
+        assert_eq!(s.execute("layer.pickAt", json!({"x": -12, "y": 12, "select": false})).unwrap()["layer"], Value::Null);
+        s.undo();
+        assert_eq!(s.execute("layer.pickAt", json!({"x": -12, "y": 12, "select": false})).unwrap()["layer"], id.0);
+    }
+
     #[test]
     fn hostile_params_are_errors_or_misses_not_panics() {
         let (mut s, _, _) = two_squares();
