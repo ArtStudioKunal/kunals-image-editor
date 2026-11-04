@@ -258,7 +258,7 @@ fn draw_crop_guides(painter: &egui::Painter, guides: &[crate::crop_overlay::Poly
     }
 }
 
-/// What the Crop tool shows past the canvas, cached per document state ([`draw_beyond_canvas`]).
+/// Cached artwork outside the native canvas, used by Crop Preview and the Multipage pasteboard.
 #[derive(Clone)]
 struct BeyondCanvas {
     snapshot: std::sync::Weak<Document>,
@@ -305,26 +305,22 @@ fn ring(outer: DRect, inner: DRect) -> Vec<DRect> {
     .collect()
 }
 
-/// Crop tool, while a frame is edited (`crop_ui::shows_beyond_canvas`): like Photoshop's crop
-/// preview, the canvas grows to every layer's pixels (a crop with Delete Cropped Pixels off keeps
-/// them; a moved layer reaches past the edges) and to the frame, transparency drawn as the
-/// checkerboard, all under the shield `crop_overlay` adds. Only the ring around the canvas is
-/// composited, on the CPU, once per document state: at most `MAX_TEXTURE` texels per side, from a
-/// downsampled proxy past that (so a far-off layer costs no more than a 16 MP composite).
-/// Drawn before the canvas, each band reaching a point under its edge. Returns whether anything
-/// past the canvas was drawn.
+/// Paint the image content outside the document canvas. Crop Preview shows transparent
+/// checkerboard out to its frame; the Multipage workspace instead paints only actual off-page
+/// artwork, leaving the surrounding pasteboard in its normal theme color. Both share the same
+/// bounded, cached off-canvas compositor, so large sparse documents do not allocate a full
+/// texture covering their entire coordinate extent. Ordinary Image Editing is unchanged.
+/// This is drawn before the native canvas; returns true when off-canvas artwork is shown.
 pub(super) fn draw_beyond_canvas(app: &mut PhotocraftApp, painter: &egui::Painter, xf: &ViewXform, idx: usize, output: Option<u32>) -> bool {
     let ctx = painter.ctx().clone();
     let Some((snapshot, id)) = app.session.documents().get(idx).map(|st| (std::sync::Arc::downgrade(&st.doc), st.doc.id)) else { return false };
     let key = egui::Id::unique(("crop-beyond-canvas", id.0, output));
+    let (doc, preview_key) = display_doc(app, idx);
+    let multipage = app.ui.workspace == "Multipage" && app.session.active_index() == Some(idx) && doc.has_artboards() && app.ui.tool != Tool::Crop;
     let frame =
         app.ui.crop_rect.filter(|f| f.iter().all(|v| v.is_finite()) && app.session.active_index() == Some(idx) && crate::crop_ui::shows_beyond_canvas(app));
-    let Some(f) = frame else {
+    if (!multipage && frame.is_none()) || (doc.has_artboards() && !multipage) {
         ctx.data_mut(|d| d.remove::<BeyondCanvas>(key));
-        return false;
-    };
-    let (doc, preview_key) = display_doc(app, idx);
-    if doc.has_artboards() {
         return false;
     }
     let (display, display_key) = canvas_display(app, &doc, output);
@@ -358,14 +354,18 @@ pub(super) fn draw_beyond_canvas(app: &mut PhotocraftApp, painter: &egui::Painte
             c
         }
     };
-    // Transparency out to the frame, in phase with the canvas's own checkerboard.
+    // Crop Preview fills the space up to the crop frame with transparent checkerboard.
+    // Multipage paints only the off-canvas artwork; blank space stays pasteboard-colored.
     let canvas = xf.doc_rect(doc.bounds());
-    // A turned frame reaches as far as its corners.
-    let f = crate::crop_ui::turned_bounds(f, crate::crop_ui::angle(app));
-    let fr = DRect::new(f[0].floor() as i32, f[1].floor() as i32, f[2].ceil() as i32, f[3].ceil() as i32);
+    let around = if multipage {
+        Vec::new()
+    } else {
+        let f = crate::crop_ui::turned_bounds(frame.expect("crop preview has a frame"), crate::crop_ui::angle(app));
+        let fr = DRect::new(f[0].floor() as i32, f[1].floor() as i32, f[2].ceil() as i32, f[3].ceil() as i32);
+        ring(c.extent.union(&fr), doc.bounds())
+    };
     let square = app.session.prefs().transparency_and_gamut.square();
-    let checker_id = square.map(|_| checker(app, &ctx));
-    let around = ring(c.extent.union(&fr), doc.bounds());
+    let checker_id = if multipage { None } else { square.map(|_| checker(app, &ctx)) };
     // A turned view (Rotate View, or the Crop tool's default mode turning the image behind its
     // box) draws each band as its turned quad: its screen bounding box would stretch the band's
     // texture and spread the checkerboard past the band.
@@ -411,7 +411,7 @@ pub(super) fn draw_beyond_canvas(app: &mut PhotocraftApp, painter: &egui::Painte
         let at = |p: Pos2| uv.min + (p - r.min) / r.size() * uv.size();
         painter.image(tex.id(), e, Rect::from_min_max(at(e.min), at(e.max)), Color32::WHITE);
     }
-    !around.is_empty()
+    !around.is_empty() || !c.bands.is_empty()
 }
 
 /// Document rect `b`'s corners on screen, clockwise from its top-left (a parallelogram in a turned
@@ -611,5 +611,38 @@ pub(super) fn draw_drag_preview(app: &mut PhotocraftApp, painter: &egui::Painter
             painter.arrow(from, off, Stroke::new(2.0, crate::theme::Tokens::get(painter.ctx()).accent));
         }
         _ => {}
+    }
+}
+
+#[cfg(test)]
+mod multipage_pasteboard_tests {
+    use super::*;
+    use photocraft_doc::{ColorMode, Layer, SampleType, Size};
+
+    #[test]
+    fn off_canvas_raster_survives_render_and_uses_bounded_bands() {
+        let mut doc = Document::new("pasteboard", Size::new(64, 48), ColorMode::Rgb, SampleType::U8);
+        let mut layer = Layer::raster("Off-page object", doc.pixel_format());
+        layer.surface_mut().unwrap().fill_rect(DRect::new(-24, 8, -8, 24), &[1.0, 0.0, 0.0, 1.0]);
+        doc.layers.push(layer);
+
+        let extent = photocraft_engine::extra_cmds::reveal_all_bounds(&doc);
+        assert_eq!(extent, DRect::new(-24, 0, 64, 48));
+        let bands = ring(extent, doc.bounds());
+        assert_eq!(bands, vec![DRect::new(-24, 0, 0, 48)]);
+        // The off-page raster already exists in the native document, even though the
+        // ordinary canvas texture excludes it. Our Multipage rendering path samples it.
+        let pixels = photocraft_compose::render(&doc, DRect::new(-24, 8, -8, 24));
+        assert_eq!(pixels.rect, DRect::new(-24, 8, -8, 24));
+        assert!(pixels.px.iter().all(|p| p[0] > 0.9 && p[3] > 0.9));
+    }
+
+    #[test]
+    fn the_off_canvas_ring_does_not_repaint_the_document() {
+        let inner = DRect::new(0, 0, 80, 60);
+        let outer = DRect::new(-30, -20, 110, 90);
+        let parts = ring(outer, inner);
+        assert_eq!(parts.len(), 4);
+        assert!(parts.iter().all(|b| b.intersect(&inner).is_empty()));
     }
 }
