@@ -41,6 +41,55 @@ fn print_page_presets_respect_document_dpi() {
     assert_eq!(print_inset_pixels(-3.0, 300.0), None);
 }
 
+/// Only loose root layers can use Multipage's explicit page association.
+/// Children of artboards already have structural ownership and stay clipped.
+fn loose_page_targets(doc: &photocraft_doc::Document, selected: &[LayerId]) -> Vec<LayerId> {
+    doc.layers
+        .iter()
+        .filter(|layer| layer.artboard().is_none() && selected.contains(&layer.id))
+        .map(|layer| layer.id)
+        .collect()
+}
+
+/// A loose layer can be associated with exactly one page, even when its pixels
+/// are outside that page. The panel reads ownership from stored page identities.
+fn loose_page_owner(doc: &photocraft_doc::Document, id: LayerId) -> Option<LayerId> {
+    doc.layers.iter().find_map(|layer| {
+        layer
+            .artboard()
+            .and_then(|board| board.page.as_ref())
+            .filter(|page| page.owned_layers.contains(&id))
+            .map(|_| layer.id)
+    })
+}
+
+/// A selection's association, or None for an unassigned or mixed selection.
+fn common_page_owner(doc: &photocraft_doc::Document, targets: &[LayerId]) -> Option<LayerId> {
+    let first = loose_page_owner(doc, *targets.first()?);
+    targets.iter().all(|id| loose_page_owner(doc, *id) == first).then_some(first).flatten()
+}
+
+#[cfg(test)]
+#[test]
+fn multipage_panel_targets_only_loose_root_layers_and_tracks_owner() {
+    let mut s = photocraft_engine::Session::new();
+    s.execute("file.new", json!({"width": 64, "height": 48, "background": "transparent"})).unwrap();
+    let page = s.execute("layer.new.artboard", json!({"rect": [0, 0, 64, 48], "page": true})).unwrap()["layer"].as_u64().unwrap();
+    let loose = s.execute("layer.new.layer", json!({})).unwrap()["layer"].as_u64().unwrap();
+    let page_id = LayerId(page);
+    let loose_id = LayerId(loose);
+    let doc = &s.active().unwrap().doc;
+    assert_eq!(loose_page_targets(doc, &[page_id, loose_id]), vec![loose_id]);
+    assert_eq!(loose_page_owner(doc, loose_id), None);
+    s.execute("multipage.page.setOwner", json!({"layer": loose, "page": page})).unwrap();
+    let doc = &s.active().unwrap().doc;
+    assert_eq!(loose_page_owner(doc, loose_id), Some(page_id));
+    assert_eq!(common_page_owner(doc, &[loose_id]), Some(page_id));
+    assert_eq!(loose_page_targets(doc, &[page_id]), Vec::<LayerId>::new());
+    s.execute("multipage.page.setOwner", json!({"layer": loose, "page": null})).unwrap();
+    assert_eq!(loose_page_owner(&s.active().unwrap().doc, loose_id), None);
+}
+
 // ----------------------------------------------------------------------------- layers
 
 /// The simple themes' single lock button. On the Background it converts the layer to a normal
@@ -277,6 +326,44 @@ pub(super) fn layers(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                 // Do not draw a second TextEdit for the same layer here: both
                 // would compete for keyboard focus and could end the edit early.
             });
+        }
+        // Loose artwork stays at the document root: a page association is
+        // metadata, never an implicit reparent into a clipping artboard.
+        let targets = loose_page_targets(&doc, &selection);
+        if !targets.is_empty() {
+            let owner = common_page_owner(&doc, &targets);
+            let distinct_owners: Vec<_> = targets.iter().map(|id| loose_page_owner(&doc, *id)).collect();
+            let same_owner = distinct_owners.windows(2).all(|pair| pair[0] == pair[1]);
+            ui.horizontal_wrapped(|ui| {
+                ui.label(if targets.len() == 1 { "Artwork page:" } else { "Selected artwork page:" });
+                let name = if !same_owner {
+                    "Mixed".to_owned()
+                } else if let Some(id) = owner {
+                    boards.iter().find(|(page_id, _, _)| *page_id == id).map_or("Unassigned".to_owned(), |(_, name, _)| name.clone())
+                } else {
+                    "Unassigned".to_owned()
+                };
+                ui.menu_button(name, |ui| {
+                    if ui.button("Unassigned (pasteboard)").clicked() {
+                        for id in &targets {
+                            actions.push(("multipage.page.setOwner".into(), json!({"layer": id.0, "page": null})));
+                        }
+                        ui.close();
+                    }
+                    for (page_id, page_name, _) in &boards {
+                        // Legacy artboards cannot own loose Multipage layers.
+                        if doc.layer(*page_id).and_then(|layer| layer.artboard()).is_some_and(|board| board.page.is_some())
+                            && ui.button(page_name).clicked()
+                        {
+                            for id in &targets {
+                                actions.push(("multipage.page.setOwner".into(), json!({"layer": id.0, "page": page_id.0})));
+                            }
+                            ui.close();
+                        }
+                    }
+                });
+            });
+            ui.small("Assigning artwork to a page keeps its position and editing freedom.");
         }
         ui.separator();
     }
