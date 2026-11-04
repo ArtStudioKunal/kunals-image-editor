@@ -359,10 +359,12 @@ pub(super) fn draw_beyond_canvas(app: &mut PhotocraftApp, painter: &egui::Painte
     let canvas = xf.doc_rect(doc.bounds());
     let around = if multipage {
         Vec::new()
-    } else {
-        let f = crate::crop_ui::turned_bounds(frame.expect("crop preview has a frame"), crate::crop_ui::angle(app));
+    } else if let Some(frame) = frame {
+        let f = crate::crop_ui::turned_bounds(frame, crate::crop_ui::angle(app));
         let fr = DRect::new(f[0].floor() as i32, f[1].floor() as i32, f[2].ceil() as i32, f[3].ceil() as i32);
         ring(c.extent.union(&fr), doc.bounds())
+    } else {
+        Vec::new()
     };
     let square = app.session.prefs().transparency_and_gamut.square();
     let checker_id = if multipage { None } else { square.map(|_| checker(app, &ctx)) };
