@@ -895,7 +895,7 @@ fn multipage_layout_is_undoable_validated_and_native_persistent() {
     let encoded = photocraft_io::export(doc(&s), "layout.pcraft", &photocraft_io::ExportOptions::default()).unwrap();
     let restored = photocraft_io::import("layout.pcraft", &encoded.bytes).unwrap().document;
     assert_eq!(restored.layer(LayerId(cover)).unwrap().artboard().unwrap().page, Some(layout));
-    assert_eq!(restored.layer(LayerId(duplicate)).unwrap().artboard().unwrap().page.unwrap().bleed, [1; 4]);
+    assert_eq!(restored.layer(LayerId(duplicate)).unwrap().artboard().unwrap().page.as_ref().unwrap().bleed, [1; 4]);
 }
 
 #[test]
@@ -959,5 +959,5 @@ fn multipage_legacy_artboards_are_not_implicitly_converted() {
     assert_eq!(doc(&s).layer(LayerId(first)).unwrap().artboard().unwrap().page, None);
     assert_eq!(doc(&s).layer(LayerId(second)).unwrap().artboard().unwrap().page, Some(PageLayout::default()));
     s.execute("multipage.page.setLayout", json!({"layer": first, "margins": 5})).unwrap();
-    assert_eq!(doc(&s).layer(LayerId(first)).unwrap().artboard().unwrap().page.unwrap().margins, [5; 4]);
+    assert_eq!(doc(&s).layer(LayerId(first)).unwrap().artboard().unwrap().page.as_ref().unwrap().margins, [5; 4]);
 }

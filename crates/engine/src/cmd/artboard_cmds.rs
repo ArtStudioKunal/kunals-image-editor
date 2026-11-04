@@ -395,7 +395,7 @@ fn set_props(s: &mut Session, p: &Value) -> Result<Value> {
     }
     let rect = rect_param(p, base, cmd)?;
     if let Some(page) = old.page {
-        validate_page_layout(cmd, rect, page)?;
+        validate_page_layout(cmd, rect, &page)?;
     }
     let background = background_param(p, cmd)?;
     let name = p.get("name").and_then(Value::as_str).map(str::to_string);
