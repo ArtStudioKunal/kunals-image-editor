@@ -862,7 +862,7 @@ fn multipage_layout_is_undoable_validated_and_native_persistent() {
     let changed = s.execute("multipage.page.setLayout", json!({"layer": cover, "margins": [4, 5, 6, 7], "bleed": 3})).unwrap();
     assert_eq!(changed["margins"], json!([4, 5, 6, 7]));
     assert_eq!(changed["bleed"], json!([3, 3, 3, 3]));
-    let layout = doc(&s).layer(LayerId(cover)).unwrap().artboard().unwrap().page.unwrap();
+    let layout = doc(&s).layer(LayerId(cover)).unwrap().artboard().unwrap().page.clone().unwrap();
     assert_eq!(layout.margins, [4, 5, 6, 7]);
     assert_eq!(layout.bleed, [3; 4]);
 
@@ -888,14 +888,62 @@ fn multipage_layout_is_undoable_validated_and_native_persistent() {
     let added = s.execute("layer.artboard.addBeside", json!({"layer": cover, "side": "right", "pageOrder": "after", "duplicate": true})).unwrap();
     let duplicate = added["layer"].as_u64().unwrap();
     assert_ne!(duplicate, cover);
-    assert_eq!(doc(&s).layer(LayerId(duplicate)).unwrap().artboard().unwrap().page, Some(layout));
+    assert_eq!(doc(&s).layer(LayerId(duplicate)).unwrap().artboard().unwrap().page, Some(layout.clone()));
     s.execute("multipage.page.setLayout", json!({"layer": duplicate, "bleed": 1})).unwrap();
-    assert_eq!(doc(&s).layer(LayerId(cover)).unwrap().artboard().unwrap().page, Some(layout));
+    assert_eq!(doc(&s).layer(LayerId(cover)).unwrap().artboard().unwrap().page, Some(layout.clone()));
 
     let encoded = photocraft_io::export(doc(&s), "layout.pcraft", &photocraft_io::ExportOptions::default()).unwrap();
     let restored = photocraft_io::import("layout.pcraft", &encoded.bytes).unwrap().document;
     assert_eq!(restored.layer(LayerId(cover)).unwrap().artboard().unwrap().page, Some(layout));
     assert_eq!(restored.layer(LayerId(duplicate)).unwrap().artboard().unwrap().page.unwrap().bleed, [1; 4]);
+}
+
+#[test]
+fn multipage_explicit_loose_layer_ownership_survives_reorder_save_and_undo() {
+    let mut s = session(8);
+    let cover = s.execute("layer.new.artboard", json!({"rect": [0, 0, 100, 80], "page": true})).unwrap()["layer"].as_u64().unwrap();
+    let second = s.execute("layer.artboard.addBeside", json!({"layer": cover, "side": "right", "pageOrder": "after"})).unwrap()["layer"].as_u64().unwrap();
+    let id = s.edit("Loose object", |doc, _| {
+        let mut layer = Layer::raster("Loose object", doc.pixel_format());
+        layer.surface_mut().unwrap().fill_rect(Rect::new(-20, 5, -4, 20), &[1.0, 0.0, 0.0, 1.0]);
+        let id = layer.id;
+        doc.layers.push(layer);
+        Ok(id)
+    }).unwrap();
+    let owner = |s: &mut Session| s.execute("multipage.page.ownerOf", json!({"layer": id.0})).unwrap()["page"].clone();
+    assert_eq!(owner(&mut s), Value::Null);
+    s.execute("multipage.page.setOwner", json!({"layer": id.0, "page": cover})).unwrap();
+    assert_eq!(owner(&mut s), json!(cover));
+    assert_eq!(doc(&s).layer(id).unwrap().surface().unwrap().content_bounds(), Rect::new(-20, 5, -4, 20));
+
+    s.execute("multipage.page.reorder", json!({"layer": cover, "step": "next"})).unwrap();
+    assert_eq!(owner(&mut s), json!(cover), "page ownership follows identity, not visual order");
+
+    let copied = s.execute("layer.artboard.addBeside", json!({"layer": cover, "side": "right", "duplicate": true, "pageOrder": "after"})).unwrap()["layer"].as_u64().unwrap();
+    assert!(doc(&s).layer(LayerId(copied)).unwrap().artboard().unwrap().page.as_ref().unwrap().owned_layers.is_empty());
+    assert_eq!(owner(&mut s), json!(cover));
+
+    s.execute("multipage.page.setOwner", json!({"layer": id.0, "page": second})).unwrap();
+    assert_eq!(owner(&mut s), json!(second));
+    assert!(doc(&s).layer(LayerId(cover)).unwrap().artboard().unwrap().page.as_ref().unwrap().owned_layers.is_empty());
+    assert_eq!(doc(&s).layer(LayerId(second)).unwrap().artboard().unwrap().page.as_ref().unwrap().owned_layers, vec![id]);
+
+    let data = photocraft_io::export(doc(&s), "page-owners.pcraft", &photocraft_io::ExportOptions::default()).unwrap();
+    let restored = photocraft_io::import("page-owners.pcraft", &data.bytes).unwrap().document;
+    assert_eq!(restored.layer(LayerId(second)).unwrap().artboard().unwrap().page.as_ref().unwrap().owned_layers, vec![id]);
+    assert_eq!(restored.layer(id).unwrap().surface().unwrap().content_bounds(), Rect::new(-20, 5, -4, 20));
+
+    s.undo();
+    assert_eq!(owner(&mut s), json!(cover), "ownership change is one undo step");
+    assert!(s.execute("multipage.page.setOwner", json!({"layer": id.0, "page": 999999999u64})).is_err());
+    assert_eq!(owner(&mut s), json!(cover));
+    s.execute("multipage.page.delete", json!({"layer": cover})).unwrap();
+    assert_eq!(owner(&mut s), Value::Null, "deleting a page detaches, never deletes loose artwork");
+    assert!(doc(&s).layer(id).is_some());
+    s.undo();
+    assert_eq!(owner(&mut s), json!(cover));
+    s.execute("multipage.page.setOwner", json!({"layer": id.0, "page": null})).unwrap();
+    assert_eq!(owner(&mut s), Value::Null);
 }
 
 #[test]

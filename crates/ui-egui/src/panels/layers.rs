@@ -223,7 +223,7 @@ pub(super) fn layers(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                 }
             });
             ui.label(format!("Print resolution: {} PPI", doc.resolution_dpi));
-            let layout = page.page.unwrap_or_default();
+            let layout = page.page.clone().unwrap_or_default();
             ui.horizontal_wrapped(|ui| {
                 ui.menu_button("Margins", |ui| {
                     for (label, mm) in [("None", 0.0), ("5 mm", 5.0), ("10 mm", 10.0), ("15 mm", 15.0), ("20 mm", 20.0)] {

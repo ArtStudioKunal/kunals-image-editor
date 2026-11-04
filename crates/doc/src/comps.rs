@@ -152,11 +152,15 @@ impl ArtboardBackground {
 /// Print/layout settings attached to an individual Multipage page. Insets are in
 /// native document pixels, ordered [top, right, bottom, left]. This is independent
 /// of the page's position on the larger artboard/pasteboard canvas.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct PageLayout {
     pub margins: [u32; 4],
     pub bleed: [u32; 4],
+    /// Loose top-level layers explicitly associated with this page. Association does
+    /// not reparent or clip them; they remain editable anywhere on the pasteboard.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub owned_layers: Vec<LayerId>,
 }
 
 /// An artboard: a top-level group that clips its children to `rect` and paints `background`
@@ -287,7 +291,7 @@ mod tests {
         let decoded: Artboard = serde_json::from_value(encoded).unwrap();
         assert_eq!(decoded, legacy);
 
-        let page = Artboard { page: Some(PageLayout { margins: [3, 4, 5, 6], bleed: [2; 4] }), ..legacy };
+        let page = Artboard { page: Some(PageLayout { margins: [3, 4, 5, 6], bleed: [2; 4], owned_layers: Vec::new() }), ..legacy };
         let saved = serde_json::to_value(&page).unwrap();
         let restored: Artboard = serde_json::from_value(saved).unwrap();
         assert_eq!(restored, page);
