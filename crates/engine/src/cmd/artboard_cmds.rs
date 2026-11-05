@@ -902,6 +902,42 @@ fn reorder_page(s: &mut Session, p: &Value) -> Result<Value> {
     Ok(json!({"moved": true, "layer": id.0}))
 }
 
+/// Read-only inventory for the Multipage workspace. Page order is the same as
+/// PDF export; workspace rectangles are independent of that reading order.
+/// Only explicitly marked Multipage pages participate (legacy artboards do not).
+fn list_pages(s: &mut Session, _p: &Value) -> Result<Value> {
+    let doc = &s.active().ok_or(EngineError::NoDocument)?.doc;
+    let pages: Vec<Value> = chosen_artboards(doc, &json!({}))
+        .into_iter()
+        .filter_map(|id| {
+            let layer = doc.layer(id)?;
+            let board = layer.artboard()?;
+            let layout = board.page.as_ref()?;
+            Some(json!({
+                "id": id.0,
+                "name": layer.name,
+                "rect": [board.rect.x0, board.rect.y0, board.rect.width(), board.rect.height()],
+                "margins": layout.margins,
+                "bleed": layout.bleed,
+                "ownedLayers": layout.owned_layers.iter().map(|id| id.0).collect::<Vec<_>>(),
+            }))
+        })
+        .collect();
+    let owned: Vec<LayerId> = doc
+        .layers
+        .iter()
+        .filter_map(|layer| layer.artboard().and_then(|board| board.page.as_ref()))
+        .flat_map(|page| page.owned_layers.iter().copied())
+        .collect();
+    let unassigned: Vec<u64> = doc
+        .layers
+        .iter()
+        .filter(|layer| layer.artboard().is_none() && !owned.contains(&layer.id))
+        .map(|layer| layer.id.0)
+        .collect();
+    Ok(json!({"pages": pages, "unassignedLayers": unassigned}))
+}
+
 pub fn specs() -> Vec<CommandSpec> {
     macro_rules! spec {
         ($id:expr, $label:expr, $menu:expr, $params:expr, $enabled:expr, $run:expr) => {
@@ -925,6 +961,16 @@ pub fn specs() -> Vec<CommandSpec> {
             has_doc,
             set_page_owner
         ),
+        CommandSpec {
+            id: "multipage.page.list",
+            label: "List Multipage Pages and Pasteboard Objects",
+            menu: &[],
+            shortcut: None,
+            params: r##"{} → {pages:[{id,name,rect,margins,bleed,ownedLayers}],unassignedLayers:[ids]} (read-only; PDF reading order, stable page ids)"##,
+            enabled: has_doc,
+            journal: false,
+            run: list_pages,
+        },
         CommandSpec {
             id: "multipage.page.ownerOf",
             label: "Get Loose Layer Page",

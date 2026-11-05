@@ -1009,3 +1009,36 @@ fn multipage_bulk_page_ownership_is_atomic_undoable_and_keeps_loose_coordinates(
     assert_eq!(owner(&mut s, a), json!(second));
     assert_eq!(owner(&mut s, b), json!(second));
 }
+
+#[test]
+fn multipage_page_inventory_preserves_reading_order_workspace_positions_and_loose_ownership() {
+    let mut s = session(8);
+    let assigned = add_square(&mut s, Rect::new(-10, 4, 0, 14), [1.0, 0.0, 0.0, 1.0]);
+    let unassigned = add_square(&mut s, Rect::new(140, 4, 150, 14), [0.0, 0.0, 1.0, 1.0]);
+    let first = s.execute("layer.new.artboard", json!({"rect": [0, 0, 100, 80], "page": true, "name": "Cover"})).unwrap()["layer"].as_u64().unwrap();
+    let second = s.execute("layer.artboard.addBeside", json!({"layer": first, "side": "right", "pageOrder": "after"})).unwrap()["layer"].as_u64().unwrap();
+    s.execute("multipage.page.setLayout", json!({"layer": first, "margins": 4, "bleed": 2})).unwrap();
+    s.execute("multipage.page.setOwner", json!({"layer": assigned.0, "page": first})).unwrap();
+
+    let inventory = s.execute("multipage.page.list", json!({})).unwrap();
+    assert_eq!(inventory["pages"][0]["id"], first);
+    assert_eq!(inventory["pages"][0]["name"], "Cover");
+    assert_eq!(inventory["pages"][0]["rect"], json!([0, 0, 100, 80]));
+    assert_eq!(inventory["pages"][0]["margins"], json!([4; 4]));
+    assert_eq!(inventory["pages"][0]["bleed"], json!([2; 4]));
+    assert_eq!(inventory["pages"][0]["ownedLayers"], json!([assigned.0]));
+    assert_eq!(inventory["pages"][1]["id"], second);
+    assert_eq!(inventory["unassignedLayers"], json!([unassigned.0]));
+
+    s.execute("multipage.page.reorder", json!({"layer": first, "step": "next"})).unwrap();
+    let reordered = s.execute("multipage.page.list", json!({})).unwrap();
+    assert_eq!(reordered["pages"][0]["id"], second);
+    assert_eq!(reordered["pages"][1]["id"], first);
+    assert_eq!(reordered["pages"][1]["rect"], json!([0, 0, 100, 80]));
+    assert_eq!(reordered["pages"][1]["ownedLayers"], json!([assigned.0]));
+
+    let serialized = photocraft_io::export(doc(&s), "page-inventory.pcraft", &photocraft_io::ExportOptions::default()).unwrap();
+    let restored = photocraft_io::import("page-inventory.pcraft", &serialized.bytes).unwrap().document;
+    assert_eq!(chosen_artboards(&restored, &json!({})).first().map(|id| id.0), Some(second));
+    assert_eq!(restored.layer(LayerId(first)).unwrap().artboard().unwrap().page.as_ref().unwrap().owned_layers, vec![assigned]);
+}
