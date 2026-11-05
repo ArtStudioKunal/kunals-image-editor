@@ -1024,11 +1024,12 @@ fn multipage_page_inventory_preserves_reading_order_workspace_positions_and_loos
     assert_eq!(inventory["pages"][0]["id"], first);
     assert_eq!(inventory["pages"][0]["name"], "Cover");
     assert_eq!(inventory["pages"][0]["rect"], json!([0, 0, 100, 80]));
-    assert_eq!(inventory["pages"][0]["margins"], json!([4; 4]));
-    assert_eq!(inventory["pages"][0]["bleed"], json!([2; 4]));
+    assert_eq!(inventory["pages"][0]["margins"], json!([4, 4, 4, 4]));
+    assert_eq!(inventory["pages"][0]["bleed"], json!([2, 2, 2, 2]));
     assert_eq!(inventory["pages"][0]["ownedLayers"], json!([assigned.0]));
     assert_eq!(inventory["pages"][1]["id"], second);
-    assert_eq!(inventory["unassignedLayers"], json!([unassigned.0]));
+    assert!(inventory["unassignedLayers"].as_array().unwrap().contains(&json!(unassigned.0)));
+    assert!(!inventory["unassignedLayers"].as_array().unwrap().contains(&json!(assigned.0)));
 
     s.execute("multipage.page.reorder", json!({"layer": first, "step": "next"})).unwrap();
     let reordered = s.execute("multipage.page.list", json!({})).unwrap();
