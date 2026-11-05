@@ -951,9 +951,11 @@ fn multipage_align_keys(app: &mut PhotocraftApp, ctx: &egui::Context) -> bool {
                 let selected = st.selected_layers();
                 let first = *selected.first()?;
                 st.doc.artboard_of(first).or_else(|| {
-                    st.doc.artboards().into_iter().find(|(_, _, board)| {
-                        board.page.as_ref().is_some_and(|page| page.owned_layers.contains(&first))
-                    }).map(|(id, _, _)| id)
+                    st.doc
+                        .artboards()
+                        .into_iter()
+                        .find(|(_, _, board)| board.page.as_ref().is_some_and(|page| page.owned_layers.contains(&first)))
+                        .map(|(id, _, _)| id)
                 })
             })
         } else {

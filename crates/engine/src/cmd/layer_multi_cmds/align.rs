@@ -62,16 +62,18 @@ pub(super) fn align(s: &mut Session, p: &Value, kind: &str) -> Result<Value> {
         let target = match to.as_str() {
             "page" => {
                 let id = page_id.ok_or_else(|| bad(&cmd, "`page` is required when aligning to a page"))?;
-                let board = doc.layer(id).and_then(|layer| layer.artboard()).filter(|board| board.page.is_some()).ok_or_else(|| bad(&cmd, "target must be a Multipage page"))?;
+                let board = doc
+                    .layer(id)
+                    .and_then(|layer| layer.artboard())
+                    .filter(|board| board.page.is_some())
+                    .ok_or_else(|| bad(&cmd, "target must be a Multipage page"))?;
                 if sel.contains(&id) {
                     return Err(bad(&cmd, "the page itself cannot be aligned to its own bounds"));
                 }
                 // Every selected object must belong to the chosen page, including loose
                 // objects associated through Multipage ownership rather than nesting.
-                let belongs = |layer_id: LayerId| {
-                    doc.artboard_of(layer_id) == Some(id)
-                        || board.page.as_ref().is_some_and(|page| page.owned_layers.contains(&layer_id))
-                };
+                let belongs =
+                    |layer_id: LayerId| doc.artboard_of(layer_id) == Some(id) || board.page.as_ref().is_some_and(|page| page.owned_layers.contains(&layer_id));
                 if items.iter().any(|(layer_id, _)| !belongs(*layer_id)) {
                     return Err(bad(&cmd, "all selected objects must belong to the target page"));
                 }
