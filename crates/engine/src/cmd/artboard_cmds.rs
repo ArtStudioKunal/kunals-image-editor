@@ -808,39 +808,60 @@ fn owner_of(s: &mut Session, p: &Value) -> Result<Value> {
 /// Setting page to null detaches it but retains the artwork.
 fn set_page_owner(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "multipage.page.setOwner";
-    let id = p.get("layer").and_then(Value::as_u64).map(LayerId).ok_or_else(|| bad(cmd, "layer id is required"))?;
+    let ids: Vec<LayerId> = if let Some(layers) = p.get("layers") {
+        if p.get("layer").is_some() {
+            return Err(bad(cmd, "provide either layer or layers, not both"));
+        }
+        let array = layers.as_array().ok_or_else(|| bad(cmd, "layers must be a nonempty array of layer ids"))?;
+        if array.is_empty() {
+            return Err(bad(cmd, "layers must not be empty"));
+        }
+        let mut ids = Vec::with_capacity(array.len());
+        for entry in array {
+            let id = entry.as_u64().map(LayerId).ok_or_else(|| bad(cmd, "each layer must be a valid id"))?;
+            if ids.contains(&id) {
+                return Err(bad(cmd, "duplicate layer ids are not allowed"));
+            }
+            ids.push(id);
+        }
+        ids
+    } else {
+        vec![p.get("layer").and_then(Value::as_u64).map(LayerId).ok_or_else(|| bad(cmd, "layer id is required"))?]
+    };
     let owner = match p.get("page") {
         Some(Value::Null) => None,
         Some(Value::Number(n)) => n.as_u64().map(LayerId).ok_or_else(|| bad(cmd, "page must be a page id or null")).map(Some)?,
         _ => return Err(bad(cmd, "page must be a page id or null")),
     };
     let doc = &s.active().ok_or(EngineError::NoDocument)?.doc;
-    if !doc.layers.iter().any(|layer| layer.id == id && layer.artboard().is_none()) {
-        return Err(bad(cmd, "layer must be an existing loose top-level layer"));
+    if ids.iter().any(|id| !doc.layers.iter().any(|layer| layer.id == *id && layer.artboard().is_none())) {
+        return Err(bad(cmd, "every layer must be an existing loose top-level layer"));
     }
     if owner.is_some_and(|page_id| !doc.layers.iter().any(|layer| layer.id == page_id && layer.artboard().is_some_and(|board| board.page.is_some()))) {
         return Err(bad(cmd, "target must be a Multipage page"));
     }
-    let current = doc
-        .layers
-        .iter()
-        .find_map(|layer| layer.artboard().and_then(|board| board.page.as_ref()).filter(|page| page.owned_layers.contains(&id)).map(|_| layer.id));
-    if current == owner {
-        return Ok(json!({"layer": id.0, "page": owner.map(|page| page.0)}));
+    let current_owner = |id: LayerId| {
+        doc.layers
+            .iter()
+            .find_map(|layer| layer.artboard().and_then(|board| board.page.as_ref()).filter(|page| page.owned_layers.contains(&id)).map(|_| layer.id))
+    };
+    if ids.iter().all(|id| current_owner(*id) == owner) {
+        return Ok(json!({"layers": ids.iter().map(|id| id.0).collect::<Vec<_>>(), "layer": ids.first().map(|id| id.0), "page": owner.map(|page| page.0)}));
     }
+    // Validate every target before making one atomic undoable selection change.
     s.edit("Set Page Ownership", |doc, _| {
         for layer in &mut doc.layers {
             let page_id = layer.id;
             if let Some(page) = layer.artboard_mut().and_then(|board| board.page.as_mut()) {
-                page.owned_layers.retain(|member| *member != id);
+                page.owned_layers.retain(|member| !ids.contains(member));
                 if owner == Some(page_id) {
-                    page.owned_layers.push(id);
+                    page.owned_layers.extend(ids.iter().copied());
                 }
             }
         }
         Ok(())
     })?;
-    Ok(json!({"layer": id.0, "page": owner.map(|page| page.0)}))
+    Ok(json!({"layers": ids.iter().map(|id| id.0).collect::<Vec<_>>(), "layer": ids.first().map(|id| id.0), "page": owner.map(|page| page.0)}))
 }
 
 /// Delete one top-level page/artboard, preserving the other pages and undo history.
@@ -900,7 +921,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "multipage.page.setOwner",
             "Assign Loose Layer to Page",
             &[],
-            r##"{"layer":id,"page":pageId|null} → {layer,page} (explicit association, does not move or clip the layer)"##,
+            r##"{"layer":id OR "layers":[ids],"page":pageId|null} → {layer,layers,page} (atomic undoable association; does not move or clip artwork)"##,
             has_doc,
             set_page_owner
         ),

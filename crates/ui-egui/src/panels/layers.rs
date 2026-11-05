@@ -340,17 +340,13 @@ pub(super) fn layers(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                 };
                 ui.menu_button(name, |ui| {
                     if ui.button("Unassigned (pasteboard)").clicked() {
-                        for id in &targets {
-                            actions.push(("multipage.page.setOwner".into(), json!({"layer": id.0, "page": null})));
-                        }
+                        actions.push(("multipage.page.setOwner".into(), json!({"layers": targets.iter().map(|id| id.0).collect::<Vec<_>>(), "page": null})));
                         ui.close();
                     }
                     for (page_id, page_name, _) in &boards {
                         // Legacy artboards cannot own loose Multipage layers.
                         if doc.layer(*page_id).and_then(|layer| layer.artboard()).is_some_and(|board| board.page.is_some()) && ui.button(page_name).clicked() {
-                            for id in &targets {
-                                actions.push(("multipage.page.setOwner".into(), json!({"layer": id.0, "page": page_id.0})));
-                            }
+                            actions.push(("multipage.page.setOwner".into(), json!({"layers": targets.iter().map(|id| id.0).collect::<Vec<_>>(), "page": page_id.0})));
                             ui.close();
                         }
                     }

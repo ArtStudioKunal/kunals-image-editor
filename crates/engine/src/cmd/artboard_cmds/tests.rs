@@ -961,3 +961,51 @@ fn multipage_legacy_artboards_are_not_implicitly_converted() {
     s.execute("multipage.page.setLayout", json!({"layer": first, "margins": 5})).unwrap();
     assert_eq!(doc(&s).layer(LayerId(first)).unwrap().artboard().unwrap().page.as_ref().unwrap().margins, [5; 4]);
 }
+
+#[test]
+fn multipage_bulk_page_ownership_is_atomic_undoable_and_keeps_loose_coordinates() {
+    let mut s = session(8);
+    let a = add_square(&mut s, Rect::new(-20, 4, -10, 14), [1.0, 0.0, 0.0, 1.0]);
+    let b = add_square(&mut s, Rect::new(115, 6, 130, 22), [0.0, 0.0, 1.0, 1.0]);
+    let first = s.execute("layer.new.artboard", json!({"page": true, "rect": [0, 0, 100, 80]})).unwrap()["layer"].as_u64().unwrap();
+    let second = s.execute("layer.artboard.addBeside", json!({"layer": first, "side": "right", "pageOrder": "after"})).unwrap()["layer"].as_u64().unwrap();
+    let owner = |s: &mut Session, id: LayerId| s.execute("multipage.page.ownerOf", json!({"layer": id.0})).unwrap()["page"].clone();
+    let original_a = doc(&s).layer(a).unwrap().surface().unwrap().content_bounds();
+    let original_b = doc(&s).layer(b).unwrap().surface().unwrap().content_bounds();
+
+    s.execute("multipage.page.setOwner", json!({"layers": [a.0, b.0], "page": first})).unwrap();
+    assert_eq!(owner(&mut s, a), json!(first));
+    assert_eq!(owner(&mut s, b), json!(first));
+    s.undo();
+    assert_eq!(owner(&mut s, a), Value::Null);
+    assert_eq!(owner(&mut s, b), Value::Null, "both assignments must undo together");
+    s.redo();
+    assert_eq!(owner(&mut s, a), json!(first));
+    assert_eq!(owner(&mut s, b), json!(first));
+
+    s.execute("multipage.page.setOwner", json!({"layers": [a.0, b.0], "page": second})).unwrap();
+    assert_eq!(owner(&mut s, a), json!(second));
+    assert_eq!(owner(&mut s, b), json!(second));
+    assert!(doc(&s).layer(LayerId(first)).unwrap().artboard().unwrap().page.as_ref().unwrap().owned_layers.is_empty());
+    assert_eq!(doc(&s).layer(a).unwrap().surface().unwrap().content_bounds(), original_a);
+    assert_eq!(doc(&s).layer(b).unwrap().surface().unwrap().content_bounds(), original_b);
+
+    for invalid in [
+        json!({"layers": [a.0, second], "page": first}),
+        json!({"layers": [a.0, 999999999u64], "page": first}),
+        json!({"layers": [a.0, a.0], "page": first}),
+        json!({"layers": [], "page": first}),
+        json!({"layers": [a.0, b.0], "page": 999999999u64}),
+    ] {
+        assert!(s.execute("multipage.page.setOwner", invalid).is_err());
+        assert_eq!(owner(&mut s, a), json!(second), "invalid bulk request must not partially move A");
+        assert_eq!(owner(&mut s, b), json!(second), "invalid bulk request must not partially move B");
+    }
+
+    s.execute("multipage.page.setOwner", json!({"layers": [a.0, b.0], "page": null})).unwrap();
+    assert_eq!(owner(&mut s, a), Value::Null);
+    assert_eq!(owner(&mut s, b), Value::Null);
+    s.undo();
+    assert_eq!(owner(&mut s, a), json!(second));
+    assert_eq!(owner(&mut s, b), json!(second));
+}
