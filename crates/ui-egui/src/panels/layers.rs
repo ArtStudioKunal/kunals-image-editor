@@ -64,12 +64,17 @@ fn common_page_owner(doc: &photocraft_doc::Document, targets: &[LayerId]) -> Opt
 fn multipage_panel_targets_only_loose_root_layers_and_tracks_owner() {
     let mut s = photocraft_engine::Session::new();
     s.execute("file.new", json!({"width": 64, "height": 48, "background": "transparent"})).unwrap();
-    let page = s.execute("layer.new.artboard", json!({"rect": [0, 0, 64, 48], "page": true})).unwrap()["layer"].as_u64().unwrap();
+    // Creating a layer while an artboard is active nests it inside that board.
+    // Create the loose root first, then the page, to test explicit ownership.
     let loose = s.execute("layer.new.layer", json!({})).unwrap()["layer"].as_u64().unwrap();
+    let page = s.execute("layer.new.artboard", json!({"rect": [0, 0, 64, 48], "page": true})).unwrap()["layer"].as_u64().unwrap();
+    let nested = s.execute("layer.new.layer", json!({})).unwrap()["layer"].as_u64().unwrap();
     let page_id = LayerId(page);
     let loose_id = LayerId(loose);
     let doc = &s.active().unwrap().doc;
-    assert_eq!(loose_page_targets(doc, &[page_id, loose_id]), vec![loose_id]);
+    assert_eq!(doc.artboard_of(loose_id), None);
+    assert_eq!(doc.artboard_of(LayerId(nested)), Some(page_id));
+    assert_eq!(loose_page_targets(doc, &[page_id, loose_id, LayerId(nested)]), vec![loose_id]);
     assert_eq!(loose_page_owner(doc, loose_id), None);
     s.execute("multipage.page.setOwner", json!({"layer": loose, "page": page})).unwrap();
     let doc = &s.active().unwrap().doc;
