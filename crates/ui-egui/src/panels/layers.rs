@@ -44,23 +44,13 @@ fn print_page_presets_respect_document_dpi() {
 /// Only loose root layers can use Multipage's explicit page association.
 /// Children of artboards already have structural ownership and stay clipped.
 fn loose_page_targets(doc: &photocraft_doc::Document, selected: &[LayerId]) -> Vec<LayerId> {
-    doc.layers
-        .iter()
-        .filter(|layer| layer.artboard().is_none() && selected.contains(&layer.id))
-        .map(|layer| layer.id)
-        .collect()
+    doc.layers.iter().filter(|layer| layer.artboard().is_none() && selected.contains(&layer.id)).map(|layer| layer.id).collect()
 }
 
 /// A loose layer can be associated with exactly one page, even when its pixels
 /// are outside that page. The panel reads ownership from stored page identities.
 fn loose_page_owner(doc: &photocraft_doc::Document, id: LayerId) -> Option<LayerId> {
-    doc.layers.iter().find_map(|layer| {
-        layer
-            .artboard()
-            .and_then(|board| board.page.as_ref())
-            .filter(|page| page.owned_layers.contains(&id))
-            .map(|_| layer.id)
-    })
+    doc.layers.iter().find_map(|layer| layer.artboard().and_then(|board| board.page.as_ref()).filter(|page| page.owned_layers.contains(&id)).map(|_| layer.id))
 }
 
 /// A selection's association, or None for an unassigned or mixed selection.
@@ -352,9 +342,7 @@ pub(super) fn layers(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                     }
                     for (page_id, page_name, _) in &boards {
                         // Legacy artboards cannot own loose Multipage layers.
-                        if doc.layer(*page_id).and_then(|layer| layer.artboard()).is_some_and(|board| board.page.is_some())
-                            && ui.button(page_name).clicked()
-                        {
+                        if doc.layer(*page_id).and_then(|layer| layer.artboard()).is_some_and(|board| board.page.is_some()) && ui.button(page_name).clicked() {
                             for id in &targets {
                                 actions.push(("multipage.page.setOwner".into(), json!({"layer": id.0, "page": page_id.0})));
                             }
