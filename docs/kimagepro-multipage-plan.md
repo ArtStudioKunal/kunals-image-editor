@@ -32,6 +32,19 @@ The user describes Page Up/Down **creating** pages. Current provisional behavior
 - Presentation templates, page numbering, master pages, imposition-ready options and data-driven catalog automation later.
 - Batch exports and social-media presets can reuse document/export infrastructure.
 
+## Milestone 4: PowerClip-style object containers (new requirement)
+
+Status: **Planned; not implemented.** Add an integrated, non-destructive PowerClip-equivalent to KimagePro's Multipage/vector workflow, without depending on VectorCraft as a second application.
+
+- **Container:** any supported closed vector path or shape can serve as the clipping boundary. Keep its own editable geometry, fill/stroke, transform, and stable identity separate from its contents. An open path must not silently clip.
+- **Place inside:** an undoable "Place Inside Container" action inserts one or more existing selected raster, vector, or text objects into a specified container without flattening or rasterizing their original editable representation. Preserve stacking order and transforms.
+- **Clipping/render:** content is visible only inside the container's filled vector boundary; content extending outside remains stored, movable, and editable. Ensure accurate canvas/GPU rendering and consistent export/print rasterization, including holes and anti-aliased edges.
+- **Edit contents:** enter/exit an isolated container-editing mode to move, scale, rotate, replace and reorder contained objects. Also support editing the container outline independently, and an undoable "Extract Contents" command that restores original editable objects.
+- **Nesting and safety:** support nested containers with a defined maximum depth or cycle detection; prohibit parenting a container into itself or any descendant. Reject invalid targets and locked content without partial mutations.
+- **Page/pasteboard behavior:** page association, clipboard copy/paste, duplication, save/reopen, object alignment, guides, hit-testing, masks and page/PDF export must preserve the container hierarchy and original coordinates.
+- **Keyboard/UI:** expose Place Inside, Edit Contents, Finish Editing and Extract Contents in the Layers/context UI. Keep existing CorelDRAW-style alignment letters and native image-editing shortcuts unchanged; any PowerClip shortcut must be explicitly assigned and customizable after conflict checks.
+- **Validation:** add command, undo/redo, serialization/backward-compatibility, nested clipping, complex paths/holes, mixed raster/vector/text, copy/paste, off-page rendering, preview, PDF/PNG export, and Windows GUI regression tests. Gate merging on visible editor parity and no AI features.
+
 ## Other prioritized requirements
 Existing tools should be audited before extending: healing/clone, dodge/burn, frequency separation, LUTs, smart filters, text, vector paths, guides, rulers, exports, actions, keyboard shortcuts, plugin system, auto-save/recovery, and GPU settings.
 Actual scratch-disk tile spilling is not implemented merely by the current preferences; build a robust disk-backed cache as a separate milestone.
