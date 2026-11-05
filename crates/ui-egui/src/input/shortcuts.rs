@@ -944,8 +944,29 @@ fn multipage_align_keys(app: &mut PhotocraftApp, ctx: &egui::Context) -> bool {
     });
     let Some(key) = key else { return false };
     if let Some(alignments) = multipage_align_command(key) {
+        // P must target the real page, not the canvas or the selection union.
+        // For loose pasteboard objects use their explicit Multipage ownership.
+        let page_id = if key == Key::P {
+            app.session.active().and_then(|st| {
+                let selected = st.selected_layers();
+                let first = *selected.first()?;
+                st.doc.artboard_of(first).or_else(|| {
+                    st.doc.artboards().into_iter().find(|(_, _, board)| {
+                        board.page.as_ref().is_some_and(|page| page.owned_layers.contains(&first))
+                    }).map(|(id, _, _)| id)
+                })
+            })
+        } else {
+            None
+        };
+        if key == Key::P && page_id.is_none() {
+            app.ui.status = "Select an object belonging to a Multipage page to center it".into();
+            app.ui.status_error = true;
+            return true;
+        }
         for edge in alignments {
-            if let Err(error) = app.run(&format!("layer.align.{edge}"), json!({"to": "auto"})) {
+            let params = if let Some(id) = page_id { json!({"to": "page", "page": id.0}) } else { json!({"to": "auto"}) };
+            if let Err(error) = app.run(&format!("layer.align.{edge}"), params) {
                 app.ui.status = error;
                 app.ui.status_error = true;
                 break;
