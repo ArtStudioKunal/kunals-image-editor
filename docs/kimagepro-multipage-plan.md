@@ -21,7 +21,7 @@ Current progress: existing artboards are reused as initial page primitives. A ba
 The user describes Page Up/Down **creating** pages. Current provisional behavior: Page Down inserts after the current page; Page Up inserts before, in both page list and PDF export order. Only bare nonrepeating keys act in Multipage, and focused input or active text editing suppresses insertion. Other workspaces retain the original scrolling shortcuts. A separate navigation shortcut may be added.
 
 ## Milestone 2: object alignment and paste-in-place
-- P centers selection on active page; L/R/T/B and E/C follow CorelDRAW conventions, scoped to Multipage only.
+- **Implemented on development branch (pending CI and Windows GUI verification):** P centers the combined selection on its owning Multipage page without collapsing object spacing. L/R/T/B and E/C follow CorelDRAW alignment conventions scoped to Multipage only. The P shortcut requires page membership; cross-page selections are rejected.
 - Select an explicit alignment reference: page, selection, key object, margins or guides, as supported.
 - **In progress:** In Multipage, Ctrl+C copies complete native selected layers (single raster layers included, with off-page raster tiles) and Ctrl+V pastes at the original document X/Y position between KimagePro documents. Normal image-editing Paste and external clipboard Paste are unchanged. Regression tests cover off-page native save/reopen and selection-aware copy. Page-relative unit conversions, all vector transforms, and mixed-resolution behavior still require validation.
 - Define behavior for mixed resolution, different units, document size, multi-selection, text layers, and clipboard from other applications.
