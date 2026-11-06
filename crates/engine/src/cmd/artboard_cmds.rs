@@ -8,7 +8,7 @@
 //! in every direction, like Photoshop's auto-expanding artboard canvas ([`fit_canvas`]).
 
 use photocraft_color::{Color, ColorMode, PixelFormat, SampleType};
-use photocraft_doc::{Artboard, ArtboardBackground, Document, Layer, LayerContent, LayerId, Size};
+use photocraft_doc::{Artboard, ArtboardBackground, Document, Layer, LayerContent, LayerId, PageLayout, Size};
 use photocraft_geom::{Affine, Rect};
 use photocraft_raster::Surface;
 use serde_json::{Value, json};
@@ -245,7 +245,7 @@ pub fn new_artboard_document(name: String, size: Size, mode: ColorMode, depth: S
         Some(c) => ArtboardBackground::Custom(c),
     };
     let mut board = Layer::group("Artboard 1", vec![Layer::raster("Layer 1", doc.pixel_format())]);
-    set_artboard(&mut board, Artboard { rect: doc.bounds(), background, preset: String::new() });
+    set_artboard(&mut board, Artboard { rect: doc.bounds(), background, preset: String::new(), page: None });
     doc.layers.push(board);
     doc
 }
@@ -288,10 +288,15 @@ fn new_artboard(s: &mut Session, p: &Value) -> Result<Value> {
         rect_param(&json!({"x": p.get("x"), "y": p.get("y")}), base, cmd)?
     };
     let background = background_param(p, cmd)?.unwrap_or_default();
+    let page = match p.get("page") {
+        None | Some(Value::Bool(false)) => None,
+        Some(Value::Bool(true)) => Some(PageLayout::default()),
+        _ => return Err(bad(cmd, "page must be true or false")),
+    };
     let name = p.get("name").and_then(Value::as_str).filter(|n| !n.is_empty()).map(str::to_string);
     let id = s.edit("New Artboard", |doc, active| {
         let mut g = Layer::group(name.unwrap_or_else(|| next_artboard_name(doc)), vec![]);
-        set_artboard(&mut g, Artboard { rect, background, preset });
+        set_artboard(&mut g, Artboard { rect, background, preset, page });
         let id = doc.insert_above(None, g);
         fit_canvas(doc);
         *active = Some(id);
@@ -312,7 +317,7 @@ fn artboard_from_group(s: &mut Session, p: &Value) -> Result<Value> {
         }
         let l = doc.layer_mut(id).ok_or(EngineError::NoLayer(id))?;
         let rect = crate::layer_multi_cmds::layer_bounds(l).unwrap_or(canvas);
-        set_artboard(l, Artboard { rect, background, preset: String::new() });
+        set_artboard(l, Artboard { rect, background, preset: String::new(), page: None });
         fit_canvas(doc);
         *active = Some(id);
         Ok(rect)
@@ -361,7 +366,7 @@ fn artboard_from_layers(s: &mut Session, p: &Value) -> Result<Value> {
         let [x, y, w, h] = xywh(union_bounds(&children, canvas));
         let rect = board_rect(cmd, [x, y, size[0].unwrap_or(w), size[1].unwrap_or(h)])?;
         let mut g = Layer::group(name.unwrap_or_else(|| next_artboard_name(doc)), children);
-        set_artboard(&mut g, Artboard { rect, background, preset: String::new() });
+        set_artboard(&mut g, Artboard { rect, background, preset: String::new(), page: None });
         let gid = doc.insert_above(None, g);
         crate::layer_multi_cmds::check_group_depth(doc, "Artboard from Layers")?;
         fit_canvas(doc);
@@ -389,6 +394,9 @@ fn set_props(s: &mut Session, p: &Value) -> Result<Value> {
         (base[2], base[3]) = (i64::from(w), i64::from(h));
     }
     let rect = rect_param(p, base, cmd)?;
+    if let Some(page) = old.page {
+        validate_page_layout(cmd, rect, &page)?;
+    }
     let background = background_param(p, cmd)?;
     let name = p.get("name").and_then(Value::as_str).map(str::to_string);
     let move_contents = p.get("moveContents").and_then(Value::as_bool).unwrap_or(true);
@@ -447,6 +455,13 @@ fn add_beside(s: &mut Session, p: &Value) -> Result<Value> {
     };
     let src = d.doc.layer(id).and_then(Layer::artboard).cloned().ok_or_else(|| bad(cmd, "the layer is not an artboard"))?;
     let side = p.get("side").and_then(Value::as_str).unwrap_or("right");
+    // Multipage reading order is independent of canvas position.
+    // Unspecified order preserves the existing artboard stacking behavior.
+    let page_order = match p.get("pageOrder") {
+        None | Some(Value::Null) => None,
+        Some(Value::String(order)) if order == "before" || order == "after" => Some(order.as_str()),
+        _ => return Err(bad(cmd, "pageOrder must be before or after")),
+    };
     let duplicate = p.get("duplicate").and_then(Value::as_bool).unwrap_or(false);
     let [x0, y0, w, h] = xywh(src.rect);
     let gap = i64::from(GAP);
@@ -497,7 +512,7 @@ fn add_beside(s: &mut Session, p: &Value) -> Result<Value> {
             let src_rect = doc.layer(id).and_then(Layer::artboard).map(|a| a.rect).ok_or(EngineError::NoLayer(id))?;
             let (dx, dy) = (rect.x0.saturating_sub(src_rect.x0), rect.y0.saturating_sub(src_rect.y0));
             let copy = crate::commands::layer_copy(doc, id, add_copy)?;
-            let nid = doc.insert_above(Some(id), copy);
+            let nid = if page_order == Some("after") { doc.insert_below(Some(id), copy) } else { doc.insert_above(Some(id), copy) };
             // Grow the canvas first, so shapes on the board re-render uncut where they land.
             let fit = |len: u32, edge: i32| i64::from(len).max(i64::from(edge)).clamp(1, 300_000) as u32;
             doc.size = Size::new(fit(doc.size.width, rect.x1), fit(doc.size.height, rect.y1));
@@ -505,11 +520,40 @@ fn add_beside(s: &mut Session, p: &Value) -> Result<Value> {
             let l = doc.layer_mut(nid).ok_or(EngineError::NoLayer(nid))?;
             crate::commands::translate_layer(&snapshot, l, dx, dy);
             crate::vector_cmds::translate_vectors(&snapshot, l, f64::from(dx), f64::from(dy));
+            if page_order.is_some()
+                && let Some(board) = l.artboard_mut()
+            {
+                board.page = Some(
+                    src.page
+                        .clone()
+                        .map(|mut page| {
+                            // A duplicate must not claim loose artwork belonging to the source page.
+                            page.owned_layers.clear();
+                            page
+                        })
+                        .unwrap_or_default(),
+                );
+            }
             nid
         } else {
             let mut g = Layer::group(next_artboard_name(doc), vec![]);
-            set_artboard(&mut g, Artboard { rect, background: src.background, preset: src.preset.clone() });
-            doc.insert_above(Some(id), g)
+            set_artboard(
+                &mut g,
+                Artboard {
+                    rect,
+                    background: src.background,
+                    preset: src.preset.clone(),
+                    page: src
+                        .page
+                        .clone()
+                        .map(|mut page| {
+                            page.owned_layers.clear();
+                            page
+                        })
+                        .or_else(|| page_order.map(|_| PageLayout::default())),
+                },
+            );
+            if page_order == Some("after") { doc.insert_below(Some(id), g) } else { doc.insert_above(Some(id), g) }
         };
         fit_canvas(doc);
         *active = Some(nid);
@@ -684,6 +728,211 @@ fn artboards_to_pdf(s: &mut Session, p: &Value) -> Result<Value> {
     Ok(json!({"path": path, "pages": pages.len()}))
 }
 
+fn page_insets_param(p: &Value, key: &str, cmd: &str) -> Result<Option<[u32; 4]>> {
+    let Some(value) = p.get(key) else { return Ok(None) };
+    let number = |v: &Value| v.as_u64().and_then(|n| u32::try_from(n).ok());
+    let sides = match value {
+        Value::Number(_) => {
+            let n = number(value).ok_or_else(|| bad(cmd, format!("{key} must be a nonnegative whole number of pixels")))?;
+            [n; 4]
+        }
+        Value::Array(a) if a.len() == 4 => {
+            let Some(sides) = a.iter().map(number).collect::<Option<Vec<_>>>() else {
+                return Err(bad(cmd, format!("{key} must contain four nonnegative integer pixel values")));
+            };
+            [sides[0], sides[1], sides[2], sides[3]]
+        }
+        _ => return Err(bad(cmd, format!("{key} must be pixels or [top, right, bottom, left] pixels"))),
+    };
+    Ok(Some(sides))
+}
+
+/// All insets are measured in page pixels (not absolute document/pasteboard
+/// coordinates). Margins must leave a positive content area. Bleed must fit
+/// within the page size, preventing invalid print layouts.
+fn validate_page_layout(cmd: &str, rect: Rect, page: &PageLayout) -> Result<()> {
+    let [top, right, bottom, left] = page.margins;
+    if u64::from(left) + u64::from(right) >= rect.width() as u64 || u64::from(top) + u64::from(bottom) >= rect.height() as u64 {
+        return Err(bad(cmd, "page margins must leave a positive printable area"));
+    }
+    if page.bleed.iter().any(|n| *n > rect.width().max(rect.height())) {
+        return Err(bad(cmd, "page bleed cannot exceed the larger page dimension"));
+    }
+    Ok(())
+}
+
+/// Store per-page print insets without changing any canvas geometry or layer
+/// positions. The data lives on the native Artboard (and in .pcraft manifests)
+/// so undo, duplicate, reordering and reopening retain the same settings.
+fn set_page_layout(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "multipage.page.setLayout";
+    let id = p.get("layer").and_then(Value::as_u64).map(LayerId).or_else(|| active_artboard(s)).ok_or_else(|| bad(cmd, "select a page"))?;
+    let st = s.active().ok_or(EngineError::NoDocument)?;
+    if !st.doc.layers.iter().any(|l| l.id == id && l.artboard().is_some()) {
+        return Err(bad(cmd, "the specified layer is not a top-level page"));
+    }
+    let board = st.doc.layer(id).and_then(Layer::artboard).ok_or(EngineError::NoLayer(id))?;
+    let mut layout = board.page.clone().unwrap_or_default();
+    if let Some(margins) = page_insets_param(p, "margins", cmd)? {
+        layout.margins = margins;
+    }
+    if let Some(bleed) = page_insets_param(p, "bleed", cmd)? {
+        layout.bleed = bleed;
+    }
+    validate_page_layout(cmd, board.rect, &layout)?;
+    s.edit("Set Page Layout", |doc, _| {
+        let board = doc.layer_mut(id).and_then(Layer::artboard_mut).ok_or(EngineError::NoLayer(id))?;
+        board.page = Some(layout.clone());
+        Ok(())
+    })?;
+    Ok(json!({"layer": id.0, "margins": layout.margins, "bleed": layout.bleed}))
+}
+
+/// Find the explicit page association of a loose top-level layer, if any.
+fn owner_of(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "multipage.page.ownerOf";
+    let id = p.get("layer").and_then(Value::as_u64).map(LayerId).ok_or_else(|| bad(cmd, "layer id is required"))?;
+    let doc = &s.active().ok_or(EngineError::NoDocument)?.doc;
+    if !doc.layers.iter().any(|layer| layer.id == id && layer.artboard().is_none()) {
+        return Err(bad(cmd, "layer must be an existing loose top-level layer"));
+    }
+    let owner = doc
+        .layers
+        .iter()
+        .find_map(|layer| layer.artboard().and_then(|board| board.page.as_ref()).filter(|page| page.owned_layers.contains(&id)).map(|_| layer.id.0));
+    Ok(json!({"layer": id.0, "page": owner}))
+}
+
+/// Assign or detach a loose layer without changing its coordinates or group nesting.
+/// The association is exclusive: a layer can belong to only one page at a time.
+/// Setting page to null detaches it but retains the artwork.
+fn set_page_owner(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "multipage.page.setOwner";
+    let ids: Vec<LayerId> = if let Some(layers) = p.get("layers") {
+        if p.get("layer").is_some() {
+            return Err(bad(cmd, "provide either layer or layers, not both"));
+        }
+        let array = layers.as_array().ok_or_else(|| bad(cmd, "layers must be a nonempty array of layer ids"))?;
+        if array.is_empty() {
+            return Err(bad(cmd, "layers must not be empty"));
+        }
+        let mut ids = Vec::with_capacity(array.len());
+        for entry in array {
+            let id = entry.as_u64().map(LayerId).ok_or_else(|| bad(cmd, "each layer must be a valid id"))?;
+            if ids.contains(&id) {
+                return Err(bad(cmd, "duplicate layer ids are not allowed"));
+            }
+            ids.push(id);
+        }
+        ids
+    } else {
+        vec![p.get("layer").and_then(Value::as_u64).map(LayerId).ok_or_else(|| bad(cmd, "layer id is required"))?]
+    };
+    let owner = match p.get("page") {
+        Some(Value::Null) => None,
+        Some(Value::Number(n)) => n.as_u64().map(LayerId).ok_or_else(|| bad(cmd, "page must be a page id or null")).map(Some)?,
+        _ => return Err(bad(cmd, "page must be a page id or null")),
+    };
+    let doc = &s.active().ok_or(EngineError::NoDocument)?.doc;
+    if ids.iter().any(|id| !doc.layers.iter().any(|layer| layer.id == *id && layer.artboard().is_none())) {
+        return Err(bad(cmd, "every layer must be an existing loose top-level layer"));
+    }
+    if owner.is_some_and(|page_id| !doc.layers.iter().any(|layer| layer.id == page_id && layer.artboard().is_some_and(|board| board.page.is_some()))) {
+        return Err(bad(cmd, "target must be a Multipage page"));
+    }
+    let current_owner = |id: LayerId| {
+        doc.layers
+            .iter()
+            .find_map(|layer| layer.artboard().and_then(|board| board.page.as_ref()).filter(|page| page.owned_layers.contains(&id)).map(|_| layer.id))
+    };
+    if ids.iter().all(|id| current_owner(*id) == owner) {
+        return Ok(json!({"layers": ids.iter().map(|id| id.0).collect::<Vec<_>>(), "layer": ids.first().map(|id| id.0), "page": owner.map(|page| page.0)}));
+    }
+    // Validate every target before making one atomic undoable selection change.
+    s.edit("Set Page Ownership", |doc, _| {
+        for layer in &mut doc.layers {
+            let page_id = layer.id;
+            if let Some(page) = layer.artboard_mut().and_then(|board| board.page.as_mut()) {
+                page.owned_layers.retain(|member| !ids.contains(member));
+                if owner == Some(page_id) {
+                    page.owned_layers.extend(ids.iter().copied());
+                }
+            }
+        }
+        Ok(())
+    })?;
+    Ok(json!({"layers": ids.iter().map(|id| id.0).collect::<Vec<_>>(), "layer": ids.first().map(|id| id.0), "page": owner.map(|page| page.0)}))
+}
+
+/// Delete one top-level page/artboard, preserving the other pages and undo history.
+fn delete_page(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "multipage.page.delete";
+    let id = p.get("layer").and_then(Value::as_u64).map(LayerId).or_else(|| active_artboard(s)).ok_or_else(|| bad(cmd, "select a page"))?;
+    let d = s.active().ok_or(EngineError::NoDocument)?;
+    if !d.doc.layers.iter().any(|layer| layer.id == id && layer.artboard().is_some_and(|board| board.page.is_some())) {
+        return Err(bad(cmd, "the specified layer is not a Multipage page"));
+    }
+    s.edit("Delete Page", |doc, active| {
+        doc.layers.retain(|layer| layer.id != id);
+        *active = doc.layers.iter().find(|layer| layer.artboard().is_some()).map(|layer| layer.id);
+        Ok(())
+    })?;
+    Ok(json!({"deleted": id.0}))
+}
+
+/// Reorder the top-level page stack without changing its canvas coordinates.
+fn reorder_page(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "multipage.page.reorder";
+    let id = p.get("layer").and_then(Value::as_u64).map(LayerId).or_else(|| active_artboard(s)).ok_or_else(|| bad(cmd, "select a page"))?;
+    let step = p.get("step").and_then(Value::as_str).unwrap_or("next");
+    if step != "next" && step != "previous" {
+        return Err(bad(cmd, "step must be next or previous"));
+    }
+    let d = s.active().ok_or(EngineError::NoDocument)?;
+    let positions: Vec<usize> = d.doc.layers.iter().enumerate().filter(|(_, layer)| layer.artboard().is_some_and(|board| board.page.is_some())).map(|(i, _)| i).collect();
+    let index = positions.iter().position(|i| d.doc.layers[*i].id == id).ok_or_else(|| bad(cmd, "the layer is not a Multipage page"))?;
+    // Root layers are bottom-to-top; the Pages panel and PDF export are top-to-bottom.
+    // "previous" means a higher root index and "next" a lower one.
+    let other = if step == "previous" { index.checked_add(1).filter(|i| *i < positions.len()) } else { index.checked_sub(1) };
+    let Some(other) = other else { return Ok(json!({"moved": false})) };
+    s.edit("Reorder Page", |doc, _| {
+        doc.layers.swap(positions[index], positions[other]);
+        Ok(())
+    })?;
+    Ok(json!({"moved": true, "layer": id.0}))
+}
+
+/// Read-only inventory for the Multipage workspace. Page order is the same as
+/// PDF export; workspace rectangles are independent of that reading order.
+/// Only explicitly marked Multipage pages participate (legacy artboards do not).
+fn list_pages(s: &mut Session, _p: &Value) -> Result<Value> {
+    let doc = &s.active().ok_or(EngineError::NoDocument)?.doc;
+    let pages: Vec<Value> = chosen_artboards(doc, &json!({}))
+        .into_iter()
+        .filter_map(|id| {
+            let layer = doc.layer(id)?;
+            let board = layer.artboard()?;
+            let layout = board.page.as_ref()?;
+            Some(json!({
+                "id": id.0,
+                "name": layer.name,
+                "rect": [board.rect.x0, board.rect.y0, board.rect.width(), board.rect.height()],
+                "margins": layout.margins,
+                "bleed": layout.bleed,
+                "ownedLayers": layout.owned_layers.iter().map(|id| id.0).collect::<Vec<_>>(),
+            }))
+        })
+        .collect();
+    let owned: Vec<LayerId> = doc
+        .layers
+        .iter()
+        .filter_map(|layer| layer.artboard().and_then(|board| board.page.as_ref()))
+        .flat_map(|page| page.owned_layers.iter().copied())
+        .collect();
+    let unassigned: Vec<u64> = doc.layers.iter().filter(|layer| layer.artboard().is_none() && !owned.contains(&layer.id)).map(|layer| layer.id.0).collect();
+    Ok(json!({"pages": pages, "unassignedLayers": unassigned}))
+}
+
 pub fn specs() -> Vec<CommandSpec> {
     macro_rules! spec {
         ($id:expr, $label:expr, $menu:expr, $params:expr, $enabled:expr, $run:expr) => {
@@ -692,10 +941,55 @@ pub fn specs() -> Vec<CommandSpec> {
     }
     vec![
         spec!(
+            "multipage.page.setLayout",
+            "Page Margins and Bleed",
+            &[],
+            r##"{"layer":id?,"margins":px|[top,right,bottom,left]?,"bleed":px|[top,right,bottom,left]?} → {layer,margins,bleed} (pixels; saved in native .pcraft)"##,
+            has_active_artboard,
+            set_page_layout
+        ),
+        spec!(
+            "multipage.page.setOwner",
+            "Assign Loose Layer to Page",
+            &[],
+            r##"{"layer":id OR "layers":[ids],"page":pageId|null} → {layer,layers,page} (atomic undoable association; does not move or clip artwork)"##,
+            has_doc,
+            set_page_owner
+        ),
+        CommandSpec {
+            id: "multipage.page.list",
+            label: "List Multipage Pages and Pasteboard Objects",
+            menu: &[],
+            shortcut: None,
+            params: r##"{} → {pages:[{id,name,rect,margins,bleed,ownedLayers}],unassignedLayers:[ids]} (read-only; PDF reading order, stable page ids)"##,
+            enabled: has_doc,
+            journal: false,
+            run: list_pages,
+        },
+        CommandSpec {
+            id: "multipage.page.ownerOf",
+            label: "Get Loose Layer Page",
+            menu: &[],
+            shortcut: None,
+            params: r##"{"layer":id} → {layer,page} (null if unassigned)"##,
+            enabled: has_doc,
+            journal: false,
+            run: owner_of,
+        },
+        spec!("multipage.page.delete", "Delete Page", &[], r##"{"layer":id?} → {deleted}"##, has_active_artboard, delete_page),
+        spec!(
+            "multipage.page.reorder",
+            "Reorder Page",
+            &[],
+            r##"{"layer":id?,"step":"previous|next"="next"} → {moved,layer?}"##,
+            has_active_artboard,
+            reorder_page
+        ),
+        spec!(
             "layer.new.artboard",
             "Artboard…",
             &["Layer", "New"],
-            r##"{"rect":[x,y,w,h]? | "x","y","width","height"? (default: canvas size, right of the last board),"preset":"iPhone 14|Web 1920|A4|…"?,"name":str?,"background":"white|black|transparent|custom"="white","color":[r,g,b]|"#rrggbb"? (custom)} → {layer, rect}"##,
+            r##"{"rect":[x,y,w,h]? | "x","y","width","height"? (default: canvas size, right of the last board),"preset":"iPhone 14|Web 1920|A4|…"?,"name":str?,"page":bool=false,"background":"white|black|transparent|custom"="white","color":[r,g,b]|"#rrggbb"? (custom)} → {layer, rect}"##,
             has_doc,
             new_artboard
         ),
@@ -735,7 +1029,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "layer.artboard.addBeside",
             "Add Artboard Beside",
             &[],
-            r##"{"layer":id? (default: the active artboard),"side":"left|right|top|bottom"="right","duplicate":bool=false (copy the board with its contents instead of an empty one)} → {layer, rect} (the Artboard tool's "+" buttons: same size, a 100 px gap away, past any board in the way)"##,
+            r##"{"layer":id? (default: the active artboard),"side":"left|right|top|bottom"="right","duplicate":bool=false (copy contents), "pageOrder":"before|after"? (Multipage order; default retains legacy stacking)} → {layer, rect} (the Artboard tool's "+" buttons: same size, a 100 px gap away, past any board in the way)"##,
             has_active_artboard,
             add_beside
         ),

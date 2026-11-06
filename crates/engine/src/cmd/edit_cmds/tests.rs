@@ -47,6 +47,73 @@ fn paste_centres_pixels_from_another_document() {
     assert_eq!(r["offset"], json!([0, 0]));
 }
 
+/// Multipage clipboard copies the entire editable raster layer instead of flattening
+/// a preview. Pixel tiles beyond the document's page remain editable and survive
+/// a paste into another file at precisely the original document coordinates.
+#[test]
+fn multipage_native_copy_paste_keeps_off_page_raster_pixels_and_layer_identity() {
+    let mut s = session();
+    let original = s.active().unwrap().active_layer.unwrap();
+    s.edit("off-page artwork", |doc, _| {
+        let l = doc.layer_mut(original).unwrap();
+        l.name = "Pasteboard Art".into();
+        l.opacity = 0.7;
+        l.surface_mut().unwrap().fill_rect(Rect::new(110, 40, 120, 50), &[0.0, 0.0, 1.0, 1.0]);
+        Ok(())
+    })
+    .unwrap();
+    let copied = s.execute("edit.copy", json!({"preserveLayers": true})).unwrap();
+    assert_eq!(copied["bounds"], json!([10, 10, 110, 40]));
+    assert!(s.clipboard.as_ref().unwrap().layers.is_some(), "editable layer is copied, not flattened");
+
+    s.execute("file.new", json!({"width": 100, "height": 100, "background": "transparent"})).unwrap();
+    let pasted = s.execute("edit.pasteSpecial.pasteInPlace", json!({})).unwrap();
+    assert_eq!(pasted["offset"], json!([0, 0]), "cross-document paste keeps the exact position");
+    let target = LayerId(pasted["layer"].as_u64().unwrap());
+    assert_ne!(target, original);
+    let layer = s.active().unwrap().doc.layer(target).unwrap();
+    assert_eq!(layer.name, "Pasteboard Art");
+    assert!((layer.opacity - 0.7).abs() < 0.001);
+    assert_eq!(layer.surface().unwrap().content_bounds(), Rect::new(10, 10, 120, 50));
+    assert_eq!(layer.surface().unwrap().rgba(115, 45), [0.0, 0.0, 1.0, 1.0]);
+
+    let data = photocraft_io::export(&s.active().unwrap().doc, "pasteboard.pcraft", &photocraft_io::ExportOptions::default()).unwrap();
+    let restored = photocraft_io::import("pasteboard.pcraft", &data.bytes).unwrap().document;
+    let layer = restored.layer(target).unwrap();
+    assert_eq!(layer.surface().unwrap().rgba(115, 45), [0.0, 0.0, 1.0, 1.0]);
+}
+
+/// Sparse pasteboard artwork may occupy distant native tiles. Copy needs work
+/// proportional to stored tiles, not the area between them.
+#[test]
+fn multipage_copy_sparse_distant_tiles_without_losing_content() {
+    let mut s = session();
+    let id = s.active().unwrap().active_layer.unwrap();
+    s.edit("distant artwork", |doc, _| {
+        doc.layer_mut(id).unwrap().surface_mut().unwrap().fill_rect(Rect::new(250_000, 250_000, 250_001, 250_001), &[0.0, 1.0, 0.0, 1.0]);
+        Ok(())
+    })
+    .unwrap();
+    s.execute("edit.copy", json!({"preserveLayers": true})).unwrap();
+    let clip = s.clipboard.as_ref().unwrap();
+    assert!(clip.layers.is_some(), "native layer must remain editable");
+    assert!(clip.surface.tile_count() <= 4, "a sparse copy must not allocate intervening empty tiles");
+    assert_eq!(clip.surface.rgba(250_000, 250_000), [0.0, 1.0, 0.0, 1.0]);
+}
+
+/// The preserve-layers option is restricted to native objects with no pixel selection.
+/// A normal pixel-selection copy still makes a pixel clipboard as before.
+#[test]
+fn multipage_preserve_layers_respects_existing_pixel_selection() {
+    let mut s = session();
+    s.execute("select.all", json!({})).unwrap();
+    s.execute("edit.copy", json!({"preserveLayers": true})).unwrap();
+    assert!(s.clipboard.as_ref().unwrap().layers.is_none());
+    s.execute("select.deselect", json!({})).unwrap();
+    s.execute("edit.copy", json!({})).unwrap();
+    assert!(s.clipboard.as_ref().unwrap().layers.is_none(), "ordinary image-editing copy still rasterizes");
+}
+
 #[test]
 fn paste_centers_clipboard_bounds_near_coordinate_limits() {
     for origin in [i32::MAX - 512, i32::MIN + 512] {

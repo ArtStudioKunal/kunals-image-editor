@@ -199,6 +199,62 @@ fn drag(app: &mut PhotocraftApp, from: [f64; 2], to: [f64; 2], m: egui::Modifier
     crate::canvas::tool_event(app, ToolEvent::Up { x: to[0], y: to[1] }, m);
 }
 
+/// The Multipage Move tool must pick a loose object outside the native canvas, show
+/// it travelling across the pasteboard, and retain its new coordinates after reopen.
+/// Artboard clipping and page order must not consume or flatten the loose layer.
+#[test]
+fn multipage_drag_from_off_canvas_to_another_page_survives_reopen_and_undo() {
+    let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+    app.session.execute("file.new", json!({"width": 64, "height": 48, "background": "transparent"})).unwrap();
+    app.session.execute("layer.new.artboard", json!({"rect": [0, 0, 64, 48], "page": true})).unwrap();
+    app.session.execute("layer.new.artboard", json!({"rect": [96, 0, 64, 48], "page": true})).unwrap();
+    let second = app.session.active().unwrap().doc.artboards().last().unwrap().2.rect;
+    let id = app
+        .session
+        .edit("Loose pasteboard art", |doc, _| {
+            let mut layer = photocraft_doc::Layer::raster("Loose pasteboard art", doc.pixel_format());
+            layer.surface_mut().unwrap().fill_rect(Rect::new(-24, 8, -8, 24), &[1.0, 0.0, 0.0, 1.0]);
+            let id = layer.id;
+            doc.layers.push(layer);
+            Ok(id)
+        })
+        .unwrap();
+    app.sync_views();
+    app.ui.workspace = "Multipage".into();
+    app.ui.tool = Tool::Move;
+    app.ui.tool_options.move_auto_select = true;
+    app.ui.extras.snap = false;
+    app.ui.view.show.smart_guides = false;
+
+    let from = [-16.0, 16.0];
+    let to = [second.x0 as f64 + 16.0, 16.0];
+    let dx = (to[0] - from[0]) as i32;
+    let m = egui::Modifiers::NONE;
+    crate::canvas::tool_event(&mut app, ToolEvent::Down { x: from[0], y: from[1], pressure: 1.0 }, m);
+    assert_eq!(app.session.active().unwrap().active_layer, Some(id), "off-canvas Auto-Select picks the loose layer");
+    crate::canvas::tool_event(&mut app, ToolEvent::Move { x: to[0], y: to[1], pressure: 1.0 }, m);
+    let preview = super::display_doc(&mut app, 0).unwrap().0;
+    assert!(preview.layer(id).unwrap().surface().unwrap().rgba(-16, 16)[3] < 0.01, "preview removes the old object");
+    assert!(preview.layer(id).unwrap().surface().unwrap().rgba(-16 + dx, 16)[3] > 0.9, "live preview follows across pages");
+    crate::canvas::tool_event(&mut app, ToolEvent::Up { x: to[0], y: to[1] }, m);
+
+    let doc = &app.session.active().unwrap().doc;
+    assert_eq!(doc.artboards().len(), 2, "moving loose artwork does not alter pages");
+    let moved = doc.layer(id).unwrap().surface().unwrap();
+    assert!(moved.rgba(-16 + dx, 16)[3] > 0.9);
+    assert!(moved.rgba(-16, 16)[3] < 0.01);
+    let bytes = photocraft_io::export(doc, "multipage-drag.pcraft", &photocraft_io::ExportOptions::default()).unwrap().bytes;
+    let reopened = photocraft_io::import("multipage-drag.pcraft", &bytes).unwrap().document;
+    assert_eq!(reopened.artboards().len(), 2);
+    assert_eq!(reopened.layer(id).unwrap().name, "Loose pasteboard art");
+    assert!(reopened.layer(id).unwrap().surface().unwrap().rgba(-16 + dx, 16)[3] > 0.9);
+
+    assert!(app.session.undo(), "one Undo restores the pre-drag position");
+    let restored = app.session.active().unwrap().doc.layer(id).unwrap().surface().unwrap();
+    assert!(restored.rgba(-16, 16)[3] > 0.9);
+    assert!(restored.rgba(-16 + dx, 16)[3] < 0.01);
+}
+
 /// ↩ through the app's key handling.
 fn enter(app: &mut PhotocraftApp) {
     let ctx = egui::Context::default();

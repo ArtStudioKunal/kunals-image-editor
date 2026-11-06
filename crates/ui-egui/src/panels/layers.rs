@@ -6,6 +6,110 @@ use super::layer_row::{RowSel, layer_row};
 use super::options_bar::{LAYER_PCT_W, body_text_width, pct_action, scrub_pct_label};
 use super::{BlendMode, Layer, LayerId, MaskKind, PhotocraftApp, Rect, Sense, Tokens, Value, empty, icons, json, label, pos2, theme, vec2, widgets};
 
+/// Convert physical page dimensions (millimetres) to document pixels using the
+/// document's actual PPI. Artboard dimensions are pixels, not PDF points:
+/// using 595×842 for A4 at 300 PPI would print a page much smaller than A4.
+fn print_page_pixels(mm_width: f64, mm_height: f64, dpi: f32) -> Option<(u32, u32)> {
+    if !dpi.is_finite() || dpi <= 0.0 || !mm_width.is_finite() || !mm_height.is_finite() {
+        return None;
+    }
+    let axis = |mm: f64| {
+        let px = (mm * f64::from(dpi) / 25.4).round();
+        if (1.0..=300_000.0).contains(&px) { Some(px as u32) } else { None }
+    };
+    Some((axis(mm_width)?, axis(mm_height)?))
+}
+
+/// Convert a nonnegative millimetre margin/bleed to document pixels.
+fn print_inset_pixels(mm: f64, dpi: f32) -> Option<u32> {
+    if !mm.is_finite() || !dpi.is_finite() || dpi <= 0.0 {
+        return None;
+    }
+    let px = (mm * f64::from(dpi) / 25.4).round();
+    (0.0..=300_000.0).contains(&px).then_some(px as u32)
+}
+
+#[cfg(test)]
+#[test]
+fn print_page_presets_respect_document_dpi() {
+    assert_eq!(print_page_pixels(210.0, 297.0, 300.0), Some((2480, 3508)));
+    assert_eq!(print_page_pixels(215.9, 279.4, 72.0), Some((612, 792)));
+    assert_eq!(print_page_pixels(210.0, 297.0, 0.0), None);
+    assert_eq!(print_page_pixels(210.0, 297.0, f32::NAN), None);
+    assert_eq!(print_inset_pixels(3.0, 300.0), Some(35));
+    assert_eq!(print_inset_pixels(0.0, 72.0), Some(0));
+    assert_eq!(print_inset_pixels(-3.0, 300.0), None);
+}
+
+/// The Pages panel must show only native Multipage pages. Legacy artboards
+/// remain in the regular Layers tree and must not be silently converted.
+fn multipage_page_rows(doc: &photocraft_doc::Document) -> Vec<(LayerId, String, photocraft_geom::Rect)> {
+    doc.layers
+        .iter()
+        .rev()
+        .filter_map(|layer| layer.artboard().filter(|board| board.page.is_some()).map(|board| (layer.id, layer.name.clone(), board.rect)))
+        .collect()
+}
+
+/// Only loose root layers can use Multipage's explicit page association.
+/// Children of artboards already have structural ownership and stay clipped.
+fn loose_page_targets(doc: &photocraft_doc::Document, selected: &[LayerId]) -> Vec<LayerId> {
+    doc.layers.iter().filter(|layer| layer.artboard().is_none() && selected.contains(&layer.id)).map(|layer| layer.id).collect()
+}
+
+/// A loose layer can be associated with exactly one page, even when its pixels
+/// are outside that page. The panel reads ownership from stored page identities.
+fn loose_page_owner(doc: &photocraft_doc::Document, id: LayerId) -> Option<LayerId> {
+    doc.layers.iter().find_map(|layer| layer.artboard().and_then(|board| board.page.as_ref()).filter(|page| page.owned_layers.contains(&id)).map(|_| layer.id))
+}
+
+/// A selection's association, or None for an unassigned or mixed selection.
+fn common_page_owner(doc: &photocraft_doc::Document, targets: &[LayerId]) -> Option<LayerId> {
+    let first = loose_page_owner(doc, *targets.first()?);
+    targets.iter().all(|id| loose_page_owner(doc, *id) == first).then_some(first).flatten()
+}
+
+#[cfg(test)]
+#[test]
+fn multipage_panel_targets_only_loose_root_layers_and_tracks_owner() {
+    let mut s = photocraft_engine::Session::new();
+    s.execute("file.new", json!({"width": 64, "height": 48, "background": "transparent"})).unwrap();
+    // Creating a layer while an artboard is active nests it inside that board.
+    // Create the loose root first, then the page, to test explicit ownership.
+    let loose = s.execute("layer.new.layer", json!({})).unwrap()["layer"].as_u64().unwrap();
+    let page = s.execute("layer.new.artboard", json!({"rect": [0, 0, 64, 48], "page": true})).unwrap()["layer"].as_u64().unwrap();
+    let nested = s.execute("layer.new.layer", json!({})).unwrap()["layer"].as_u64().unwrap();
+    let page_id = LayerId(page);
+    let loose_id = LayerId(loose);
+    let doc = &s.active().unwrap().doc;
+    assert_eq!(doc.artboard_of(loose_id), None);
+    assert_eq!(doc.artboard_of(LayerId(nested)), Some(page_id));
+    assert_eq!(loose_page_targets(doc, &[page_id, loose_id, LayerId(nested)]), vec![loose_id]);
+    assert_eq!(loose_page_owner(doc, loose_id), None);
+    s.execute("multipage.page.setOwner", json!({"layer": loose, "page": page})).unwrap();
+    let doc = &s.active().unwrap().doc;
+    assert_eq!(loose_page_owner(doc, loose_id), Some(page_id));
+    assert_eq!(common_page_owner(doc, &[loose_id]), Some(page_id));
+    assert_eq!(loose_page_targets(doc, &[page_id]), Vec::<LayerId>::new());
+    s.execute("multipage.page.setOwner", json!({"layer": loose, "page": null})).unwrap();
+    assert_eq!(loose_page_owner(&s.active().unwrap().doc, loose_id), None);
+}
+
+
+#[cfg(test)]
+#[test]
+fn multipage_panel_shows_only_explicit_pages_and_keeps_legacy_artboards_out() {
+    let mut s = photocraft_engine::Session::new();
+    s.execute("file.new", json!({"width": 100, "height": 80, "background": "transparent"})).unwrap();
+    let legacy = s.execute("layer.new.artboard", json!({"rect": [0, 0, 100, 80], "name": "Legacy"})).unwrap()["layer"].as_u64().unwrap();
+    let first = s.execute("layer.new.artboard", json!({"rect": [200, 0, 100, 80], "page": true, "name": "Page 1"})).unwrap()["layer"].as_u64().unwrap();
+    let second = s.execute("layer.artboard.addBeside", json!({"layer": first, "side": "right", "pageOrder": "after"})).unwrap()["layer"].as_u64().unwrap();
+    let doc = &s.active().unwrap().doc;
+    let ids: Vec<_> = multipage_page_rows(doc).iter().map(|row| row.0).collect();
+    assert_eq!(ids, vec![LayerId(first), LayerId(second)]);
+    assert!(!ids.contains(&LayerId(legacy)));
+    assert!(doc.layer(LayerId(legacy)).unwrap().artboard().unwrap().page.is_none());
+}
 // ----------------------------------------------------------------------------- layers
 
 /// The simple themes' single lock button. On the Background it converts the layer to a normal
@@ -117,6 +221,169 @@ pub(super) fn layers(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     let selection = st.selected_layers();
     let isolated = st.isolated_layers.clone();
     let mut actions: Vec<(String, Value)> = Vec::new();
+    // Multipage uses persistent artboards as pages. Keep controls beside the
+    // existing Layers tree so page selection and layer editing stay in sync.
+    if app.ui.workspace == "Multipage" {
+        let boards = multipage_page_rows(&doc);
+        let selected = active.and_then(|id| doc.artboard_of(id)).filter(|id| boards.iter().any(|(page_id, _, _)| page_id == id));
+        let selected_pos = selected.and_then(|id| boards.iter().position(|(page_id, _, _)| *page_id == id));
+        ui.heading("Pages");
+        ui.horizontal_wrapped(|ui| {
+            if ui.button("+ Page").clicked() {
+                actions.push(if let Some(id) = selected {
+                    ("layer.artboard.addBeside".into(), json!({"layer": id.0, "side": "right", "pageOrder": "after"}))
+                } else {
+                    ("layer.new.artboard".into(), json!({"background": "white", "page": true}))
+                });
+            }
+            if ui.add_enabled(selected.is_some(), egui::Button::new("Duplicate")).clicked()
+                && let Some(id) = selected
+            {
+                actions.push(("layer.artboard.addBeside".into(), json!({"layer": id.0, "side": "right", "duplicate": true, "pageOrder": "after"})));
+            }
+            if ui.add_enabled(selected.is_some(), egui::Button::new("Delete")).clicked()
+                && let Some(id) = selected
+            {
+                actions.push(("multipage.page.delete".into(), json!({"layer": id.0})));
+            }
+        });
+        ui.horizontal_wrapped(|ui| {
+            if ui.add_enabled(selected_pos.is_some_and(|i| i > 0), egui::Button::new("Move Earlier")).clicked()
+                && let Some(id) = selected
+            {
+                actions.push(("multipage.page.reorder".into(), json!({"layer": id.0, "step": "previous"})));
+            }
+            if ui.add_enabled(selected_pos.is_some_and(|i| i + 1 < boards.len()), egui::Button::new("Move Later")).clicked()
+                && let Some(id) = selected
+            {
+                actions.push(("multipage.page.reorder".into(), json!({"layer": id.0, "step": "next"})));
+            }
+        });
+        if let Some(id) = selected
+            && let Some(layer) = doc.layer(id)
+            && let Some(page) = layer.artboard()
+        {
+            ui.horizontal_wrapped(|ui| {
+                ui.label(format!("{} × {} px", page.rect.width(), page.rect.height()));
+                if ui.small_button("Rotate Page").on_hover_text("Swap page width and height without moving its origin").clicked() {
+                    actions.push(("layer.artboard.set".into(), json!({"layer": id.0, "width": page.rect.height(), "height": page.rect.width()})));
+                }
+                ui.menu_button("Page Size", |ui| {
+                    for (label, width_mm, height_mm) in [
+                        ("A4 portrait", 210.0, 297.0),
+                        ("A4 landscape", 297.0, 210.0),
+                        ("A3 portrait", 297.0, 420.0),
+                        ("A3 landscape", 420.0, 297.0),
+                        ("US Letter portrait", 215.9, 279.4),
+                        ("US Letter landscape", 279.4, 215.9),
+                    ] {
+                        if let Some((width, height)) = print_page_pixels(width_mm, height_mm, doc.resolution_dpi)
+                            && ui.button(label).clicked()
+                        {
+                            actions.push(("layer.artboard.set".into(), json!({"layer": id.0, "width": width, "height": height})));
+                            ui.close();
+                        }
+                    }
+                });
+                if ui.small_button("Rename Page").clicked()
+                    && let Some(done) = crate::layer_row_ui::start_rename(ui.ctx(), id.0, &layer.name)
+                {
+                    actions.push(done);
+                }
+            });
+            ui.label(format!("Print resolution: {} PPI", doc.resolution_dpi));
+            let layout = page.page.clone().unwrap_or_default();
+            ui.horizontal_wrapped(|ui| {
+                ui.menu_button("Margins", |ui| {
+                    for (label, mm) in [("None", 0.0), ("5 mm", 5.0), ("10 mm", 10.0), ("15 mm", 15.0), ("20 mm", 20.0)] {
+                        if let Some(px) = print_inset_pixels(mm, doc.resolution_dpi) {
+                            let allowed = u64::from(px) * 2 < page.rect.width() as u64 && u64::from(px) * 2 < page.rect.height() as u64;
+                            if ui.add_enabled(allowed, egui::Button::new(label)).clicked() {
+                                actions.push(("multipage.page.setLayout".into(), json!({"layer": id.0, "margins": px})));
+                                ui.close();
+                            }
+                        }
+                    }
+                });
+                ui.menu_button("Bleed", |ui| {
+                    for (label, mm) in [("None", 0.0), ("3 mm", 3.0), ("5 mm", 5.0), ("7 mm", 7.0)] {
+                        if let Some(px) = print_inset_pixels(mm, doc.resolution_dpi)
+                            && ui.button(label).clicked()
+                        {
+                            actions.push(("multipage.page.setLayout".into(), json!({"layer": id.0, "bleed": px})));
+                            ui.close();
+                        }
+                    }
+                });
+                ui.label(format!("Margins {:?} px · Bleed {:?} px", layout.margins, layout.bleed));
+            });
+        }
+        for (index, (id, name, rect)) in boards.iter().enumerate() {
+            let is_selected = selected == Some(*id);
+            ui.horizontal(|ui| {
+                // A page-preview tile uses page geometry rather than a potentially
+                // expensive full document render on every panel frame.
+                let (tile, _) = ui.allocate_exact_size(egui::vec2(30.0, 38.0), egui::Sense::hover());
+                let painter = ui.painter();
+                painter.rect_filled(tile.shrink(2.0), 2.0, egui::Color32::WHITE);
+                painter.rect_stroke(
+                    tile.shrink(2.0),
+                    2.0,
+                    egui::Stroke::new(1.0, if is_selected { egui::Color32::LIGHT_BLUE } else { egui::Color32::GRAY }),
+                    egui::StrokeKind::Inside,
+                );
+                let label = format!("{} · {} ({} × {})", index + 1, name, rect.width(), rect.height());
+                let row = ui.selectable_label(is_selected, label);
+                if row.clicked() {
+                    actions.push(("layer.select".into(), json!({"layer": id.0})));
+                }
+                if row.double_clicked()
+                    && let Some(done) = crate::layer_row_ui::start_rename(ui.ctx(), id.0, name)
+                {
+                    actions.push(done);
+                }
+                // The existing Layers tree owns the in-place rename field.
+                // Do not draw a second TextEdit for the same layer here: both
+                // would compete for keyboard focus and could end the edit early.
+            });
+        }
+        // Loose artwork stays at the document root: a page association is
+        // metadata, never an implicit reparent into a clipping artboard.
+        let targets = loose_page_targets(&doc, &selection);
+        if !targets.is_empty() {
+            let owner = common_page_owner(&doc, &targets);
+            let distinct_owners: Vec<_> = targets.iter().map(|id| loose_page_owner(&doc, *id)).collect();
+            let same_owner = distinct_owners.windows(2).all(|pair| pair[0] == pair[1]);
+            ui.horizontal_wrapped(|ui| {
+                ui.label(if targets.len() == 1 { "Artwork page:" } else { "Selected artwork page:" });
+                let name = if !same_owner {
+                    "Mixed".to_owned()
+                } else if let Some(id) = owner {
+                    boards.iter().find(|(page_id, _, _)| *page_id == id).map_or("Unassigned".to_owned(), |(_, name, _)| name.clone())
+                } else {
+                    "Unassigned".to_owned()
+                };
+                ui.menu_button(name, |ui| {
+                    if ui.button("Unassigned (pasteboard)").clicked() {
+                        actions.push(("multipage.page.setOwner".into(), json!({"layers": targets.iter().map(|id| id.0).collect::<Vec<_>>(), "page": null})));
+                        ui.close();
+                    }
+                    for (page_id, page_name, _) in &boards {
+                        // Legacy artboards cannot own loose Multipage layers.
+                        if doc.layer(*page_id).and_then(|layer| layer.artboard()).is_some_and(|board| board.page.is_some()) && ui.button(page_name).clicked() {
+                            actions.push((
+                                "multipage.page.setOwner".into(),
+                                json!({"layers": targets.iter().map(|id| id.0).collect::<Vec<_>>(), "page": page_id.0}),
+                            ));
+                            ui.close();
+                        }
+                    }
+                });
+            });
+            ui.small("Assigning artwork to a page keeps its position and editing freedom.");
+        }
+        ui.separator();
+    }
 
     let t = Tokens::get(ui.ctx());
     app.reorder_preview_hit = false;

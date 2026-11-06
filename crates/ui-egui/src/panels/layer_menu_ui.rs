@@ -154,6 +154,34 @@ pub fn show(app: &crate::PhotocraftApp, ui: &mut egui::Ui, l: &Layer, on_set: bo
             rename = true;
             ui.close();
         }
+        // Multipage ownership is independent of the layer tree. Offer this
+        // only for loose root artwork, not children clipped by an artboard.
+        if app.ui.workspace == "Multipage"
+            && let Some(st) = app.session.active()
+            && st.doc.layers.iter().any(|root| root.id == l.id && root.artboard().is_none())
+        {
+            let pages: Vec<_> = st
+                .doc
+                .layers
+                .iter()
+                .rev()
+                .filter_map(|root| root.artboard().and_then(|board| board.page.as_ref()).map(|_| (root.id, root.name.clone())))
+                .collect();
+            if !pages.is_empty() {
+                ui.menu_button("Assign to Page", |ui| {
+                    if ui.button("Unassigned (pasteboard)").clicked() {
+                        actions.push(("multipage.page.setOwner".into(), json!({"layer": l.id.0, "page": null})));
+                        ui.close();
+                    }
+                    for (page_id, name) in &pages {
+                        if ui.button(name).clicked() {
+                            actions.push(("multipage.page.setOwner".into(), json!({"layer": l.id.0, "page": page_id.0})));
+                            ui.close();
+                        }
+                    }
+                });
+            }
+        }
         color_menu(app, ui, l, on_set, actions);
         rename
     })

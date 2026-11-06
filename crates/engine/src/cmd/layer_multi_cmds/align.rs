@@ -52,6 +52,7 @@ pub(super) fn align(s: &mut Session, p: &Value, kind: &str) -> Result<Value> {
     let edge = Edge::parse(kind).ok_or_else(|| bad(&cmd, "unknown edge"))?;
     let sel = selected(s);
     let to = p.get("to").and_then(Value::as_str).unwrap_or("auto").to_string();
+    let page_id = p.get("page").and_then(Value::as_u64).map(LayerId);
     let before = s.active().ok_or(EngineError::NoDocument)?.doc.clone();
     let moved = s.edit("Align", |doc, _| {
         let items = bounded_selection(doc, &sel);
@@ -59,6 +60,25 @@ pub(super) fn align(s: &mut Session, p: &Value, kind: &str) -> Result<Value> {
             return Err(EngineError::Other("the selected layers have no content to align".into()));
         }
         let target = match to.as_str() {
+            "page" => {
+                let id = page_id.ok_or_else(|| bad(&cmd, "`page` is required when aligning to a page"))?;
+                let board = doc
+                    .layer(id)
+                    .and_then(|layer| layer.artboard())
+                    .filter(|board| board.page.is_some())
+                    .ok_or_else(|| bad(&cmd, "target must be a Multipage page"))?;
+                if sel.contains(&id) {
+                    return Err(bad(&cmd, "the page itself cannot be aligned to its own bounds"));
+                }
+                // Every selected object must belong to the chosen page, including loose
+                // objects associated through Multipage ownership rather than nesting.
+                let belongs =
+                    |layer_id: LayerId| doc.artboard_of(layer_id) == Some(id) || board.page.as_ref().is_some_and(|page| page.owned_layers.contains(&layer_id));
+                if items.iter().any(|(layer_id, _)| !belongs(*layer_id)) {
+                    return Err(bad(&cmd, "all selected objects must belong to the target page"));
+                }
+                board.rect
+            }
             "canvas" => doc.bounds(),
             "selection" => doc.selection.as_ref().map(|m| m.content_bounds()).ok_or_else(|| EngineError::Other("there is no selection to align to".into()))?,
             "auto" | "layers" => match (&doc.selection, sel.len()) {
@@ -70,16 +90,22 @@ pub(super) fn align(s: &mut Session, p: &Value, kind: &str) -> Result<Value> {
                 (None, 1) if to == "auto" => items.first().map_or_else(|| doc.bounds(), |(id, _)| board_or_canvas(doc, *id)),
                 _ => items.iter().fold(Rect::EMPTY, |a, (_, b)| a.union(b)),
             },
-            other => return Err(bad(&cmd, format!("`to` must be auto|layers|selection|canvas, not `{other}`"))),
+            other => return Err(bad(&cmd, format!("`to` must be auto|layers|selection|canvas|page, not `{other}`"))),
         };
         if target.is_empty() {
             return Err(EngineError::Other("nothing to align to".into()));
         }
         let t2 = edge.value2(&target);
+        // CorelDRAW-style P centers the selected arrangement as one group, preserving
+        // spacing between objects instead of stacking their centers on top of each other.
+        let page_delta = (to == "page").then(|| {
+            let selection = items.iter().fold(Rect::EMPTY, |acc, (_, rect)| acc.union(rect));
+            (t2 - edge.value2(&selection)).div_euclid(2) as i32
+        });
         let moves: Vec<(LayerId, i32, i32)> = items
             .iter()
             .flat_map(|(id, r)| {
-                let d = (t2 - edge.value2(r)).div_euclid(2) as i32;
+                let d = page_delta.unwrap_or_else(|| (t2 - edge.value2(r)).div_euclid(2) as i32);
                 let (dx, dy) = edge.delta(d);
                 // Linked layers travel with the layer they are linked to.
                 with_links(doc, &[*id]).into_iter().map(move |l| (l, dx, dy))
