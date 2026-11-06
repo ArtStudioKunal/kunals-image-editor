@@ -929,12 +929,7 @@ fn list_pages(s: &mut Session, _p: &Value) -> Result<Value> {
         .filter_map(|layer| layer.artboard().and_then(|board| board.page.as_ref()))
         .flat_map(|page| page.owned_layers.iter().copied())
         .collect();
-    let unassigned: Vec<u64> = doc
-        .layers
-        .iter()
-        .filter(|layer| layer.artboard().is_none() && !owned.contains(&layer.id))
-        .map(|layer| layer.id.0)
-        .collect();
+    let unassigned: Vec<u64> = doc.layers.iter().filter(|layer| layer.artboard().is_none() && !owned.contains(&layer.id)).map(|layer| layer.id.0).collect();
     Ok(json!({"pages": pages, "unassignedLayers": unassigned}))
 }
 
