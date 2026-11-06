@@ -1,47 +1,40 @@
-# KimagePro: seven-day beta release gate
+# KimagePro — Quality-first release plan
 
-Planning start: 2026-11-06. Target review: 2026-11-13.
+Status: **Active development; no fixed release deadline.**
 
-This is a **time-boxed, limited-scope Windows beta candidate**, not a promise that the complete CorelDRAW-style feature roadmap can ship in seven days. A release is permitted only after the gates below pass. Work is tracked on draft PR #3 until validation is complete.
+This document supersedes the earlier seven-day beta target. The **13 November 2026 date is withdrawn**. The original goal is to build a stable, useful, integrated KimagePro editor rather than ship an incomplete application to meet an arbitrary schedule.
 
-## Freeze the beta scope
+## Product priorities (in order)
 
-Include only existing, working image-editing functionality plus the Multipage features already available on the development branch:
+1. **Independent multipage model and editable pasteboard.** Separate logical page order from artboard stacking, preserve stable object ownership and coordinates, make off-page artwork visible and editable, and validate saving/reopening, undo/redo, selection, hit-testing, and export.
+2. **Integrated vector editing.** Develop one consistent object and tool model alongside raster editing: paths, nodes, transforms, shapes, text, stacking, selection, and non-destructive operations. Avoid launching a second disconnected vector application.
+3. **PowerClip-style containers.** Support closed-path clipping, editable contents and container boundary, undoable placement/extraction, nesting safeguards, document persistence, and correct export.
+4. **Professional multipage print/PDF.** Implement correct page/trim/bleed/crop geometry, page-order output, page ownership rules, and reliable export from both raster and vector content.
+5. **Quality, performance, and Windows release.** Validate existing raster functionality, compatibility, crash recovery, large documents, branding, update opt-in, licensing and attribution. Complete GUI acceptance testing before release.
 
-- KimagePro branding and update checking **off by default**, with explicit manual opt-in.
-- Existing raster/image editing and established shortcuts, without regressions.
-- Artboard-backed Multipage page creation, duplication, naming, reordering, page size, margins/bleed metadata and saving/reopening.
-- Page Up / Page Down create pages in Multipage, without changing normal image-workspace scrolling or text-input behavior.
-- Loose-root object page associations, including atomic multi-object assignment and a read-only page/pasteboard inventory.
-- Existing alignment shortcuts and native paste-in-place, with known limitations clearly documented.
-- Existing rasterized multipage PDF export; do not claim production print/press readiness.
+## Non-negotiable stability gates
 
-Explicitly **defer** to later releases: independent non-artboard page architecture, fully interactive infinite pasteboard, complete vector engine integration, PowerClip, print-production TrimBox/BleedBox/CropBox fidelity, master pages, imposition, and advanced automated exports. Do not silently substitute partial implementations.
+- Rustfmt, Clippy, Linux CI, corpus tests, Windows unit and integration matrices, and Web/WASM checks must pass for release candidates.
+- Test the behavior users experience, not only command-layer unit tests: Windows GUI startup, tool switching, canvas interactions, undo/redo, native document round-trip, clipboard, off-page editing, and PDF output.
+- Preserve existing raster/image-editing shortcuts and behavior outside Multipage.
+- Retain upstream license and attribution notices. KimagePro automatic update checking stays **off by default**, with explicit user opt-in.
+- Do **not** build Windows installers repeatedly for every feature edit. Run the Windows test matrix as needed and produce a final release candidate build only after development gates are satisfied.
+- Do not merge draft PR #3 or label any build release-ready with unresolved data-loss, rendering, workflow, or installation blockers.
+- Document limitations honestly. Automated Windows CI is not equivalent to hands-on Windows GUI testing.
 
-## Quality gates — required before calling it a beta
+## Development checkpoints
 
-1. Rustfmt and Clippy pass; all Linux test and corpus gates pass.
-2. Windows unit **and** integration tests pass; a Windows release application compiles once at the beta-candidate stage (no repeated installer builds during routine feature edits).
-3. Manual Windows GUI smoke test covers startup, create/open/save/reopen, image-editing tools, undo/redo, page creation/reorder/delete, switching workspaces, alignment shortcuts, native clipboard, PDF export and graceful failure messages.
-4. Native .pcraft round-trip preserves page metadata, selected content and off-page object coordinates; regression tests cover invalid page ownership and undo/redo.
-5. New beta test findings categorized blocker/known limitation. Blocker bugs fixed before release, never waived to meet a date.
-6. No unexpected PhotoCraft update checks; branding and required attribution/licenses audited.
-7. Signed-off release notes specify beta limitations, supported Windows architecture, dependencies and installation/uninstall method. Verify generated Windows executable and artifacts before publishing.
+| Checkpoint | Completion evidence |
+| --- | --- |
+| Multipage and pasteboard | Correct rendering, hit-testing, ownership, editing and save/reopen regression coverage |
+| Vector integration | Unified tool and object workflows with mixed raster/vector documents |
+| PowerClip | Nested clipping, edit/extract, undo/redo, persistence and export tests |
+| PDF/print | Correct page geometry and content verified against sample multi-page projects |
+| Stabilization | Linux/Windows green, manual Windows GUI verification and resolved critical bugs |
+| Release | Verified Windows artifact, documentation, release notes and explicit go/no-go review |
 
-## Seven-day engineering focus (order, not automatic execution)
+## Timing
 
-| Day | Focus | Acceptance evidence |
-| --- | --- | --- |
-| 1 | Freeze beta scope and audit current PR/CI; stop non-critical feature expansion | Written scope, blockers, and green baseline |
-| 2 | Native save/reopen + off-page object and page membership regression coverage | Targeted tests |
-| 3 | Windows UI shortcut, selection, and workspace regression fixes | Passing tests and GUI checklist |
-| 4 | Multipage PDF smoke tests and known print limitations | Export validation and release note |
-| 5 | Branding, opt-in updates, crash handling, and dependencies audit | Checklist and test results |
-| 6 | Windows release compilation, application artifact inspection, manual smoke test | Beta-candidate build |
-| 7 | Fix release blockers, re-run gating checks, publish only if all gates green | Go/no-go decision |
+The earlier engineering-effort estimate (roughly **8–15 engineer-months** for the full feature scope) is a planning range, not a delivery promise. Calendar time depends on integration complexity, staffing, discoveries and the amount of hands-on validation needed. Do not make time-based commitments without the evidence required for a reliable schedule.
 
-## Go/no-go
-
-A pass means a **usable beta with disclosed limitations**, not full feature parity with CorelDRAW or a production-print application. If any critical GUI, data-loss, or installer issue remains, do not declare beta complete. Record the blocker and continue until validated.
-
-No CI success alone constitutes manual GUI or installer validation.
+A beta may be offered before the full release if it is independently useful and clearly labeled, but **feature completion and stability**, not the calendar, determine readiness.
