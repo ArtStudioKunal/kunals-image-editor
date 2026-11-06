@@ -869,8 +869,8 @@ fn delete_page(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "multipage.page.delete";
     let id = p.get("layer").and_then(Value::as_u64).map(LayerId).or_else(|| active_artboard(s)).ok_or_else(|| bad(cmd, "select a page"))?;
     let d = s.active().ok_or(EngineError::NoDocument)?;
-    if !d.doc.layers.iter().any(|layer| layer.id == id && layer.artboard().is_some()) {
-        return Err(bad(cmd, "the specified layer is not a top-level page"));
+    if !d.doc.layers.iter().any(|layer| layer.id == id && layer.artboard().is_some_and(|board| board.page.is_some())) {
+        return Err(bad(cmd, "the specified layer is not a Multipage page"));
     }
     s.edit("Delete Page", |doc, active| {
         doc.layers.retain(|layer| layer.id != id);
@@ -889,8 +889,8 @@ fn reorder_page(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(bad(cmd, "step must be next or previous"));
     }
     let d = s.active().ok_or(EngineError::NoDocument)?;
-    let positions: Vec<usize> = d.doc.layers.iter().enumerate().filter(|(_, layer)| layer.artboard().is_some()).map(|(i, _)| i).collect();
-    let index = positions.iter().position(|i| d.doc.layers[*i].id == id).ok_or_else(|| bad(cmd, "the layer is not a top-level page"))?;
+    let positions: Vec<usize> = d.doc.layers.iter().enumerate().filter(|(_, layer)| layer.artboard().is_some_and(|board| board.page.is_some())).map(|(i, _)| i).collect();
+    let index = positions.iter().position(|i| d.doc.layers[*i].id == id).ok_or_else(|| bad(cmd, "the layer is not a Multipage page"))?;
     // Root layers are bottom-to-top; the Pages panel and PDF export are top-to-bottom.
     // "previous" means a higher root index and "next" a lower one.
     let other = if step == "previous" { index.checked_add(1).filter(|i| *i < positions.len()) } else { index.checked_sub(1) };

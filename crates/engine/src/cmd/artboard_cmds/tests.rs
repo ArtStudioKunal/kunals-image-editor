@@ -1043,3 +1043,28 @@ fn multipage_page_inventory_preserves_reading_order_workspace_positions_and_loos
     assert_eq!(chosen_artboards(&restored, &json!({})).first().map(|id| id.0), Some(second));
     assert_eq!(restored.layer(LayerId(first)).unwrap().artboard().unwrap().page.as_ref().unwrap().owned_layers, vec![assigned]);
 }
+
+#[test]
+fn multipage_delete_and_reorder_ignore_legacy_artboards() {
+    let mut s = session(8);
+    let legacy = s.execute("layer.new.artboard", json!({"rect": [0, 0, 100, 80], "name": "Legacy"})).unwrap()["layer"].as_u64().unwrap();
+    let first = s.execute("layer.new.artboard", json!({"rect": [200, 0, 100, 80], "page": true, "name": "First"})).unwrap()["layer"].as_u64().unwrap();
+    let second = s.execute("layer.artboard.addBeside", json!({"layer": first, "side": "right", "pageOrder": "after"})).unwrap()["layer"].as_u64().unwrap();
+
+    assert!(s.execute("multipage.page.delete", json!({"layer": legacy})).is_err());
+    assert!(s.execute("multipage.page.reorder", json!({"layer": legacy, "step": "next"})).is_err());
+    assert!(doc(&s).layer(LayerId(legacy)).is_some());
+    assert_eq!(doc(&s).layer(LayerId(legacy)).unwrap().artboard().unwrap().page, None);
+
+    s.execute("multipage.page.reorder", json!({"layer": first, "step": "next"})).unwrap();
+    let pages = s.execute("multipage.page.list", json!({})).unwrap();
+    assert_eq!(pages["pages"][0]["id"], second);
+    assert_eq!(pages["pages"][1]["id"], first);
+    assert!(doc(&s).layer(LayerId(legacy)).is_some());
+
+    s.execute("multipage.page.delete", json!({"layer": first})).unwrap();
+    assert!(doc(&s).layer(LayerId(first)).is_none());
+    assert!(doc(&s).layer(LayerId(legacy)).is_some(), "deleting a page must not remove legacy artboards");
+    s.undo();
+    assert!(doc(&s).layer(LayerId(first)).is_some());
+}

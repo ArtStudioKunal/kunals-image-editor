@@ -41,6 +41,16 @@ fn print_page_presets_respect_document_dpi() {
     assert_eq!(print_inset_pixels(-3.0, 300.0), None);
 }
 
+/// The Pages panel must show only native Multipage pages. Legacy artboards
+/// remain in the regular Layers tree and must not be silently converted.
+fn multipage_page_rows(doc: &photocraft_doc::Document) -> Vec<(LayerId, String, photocraft_geom::Rect)> {
+    doc.layers
+        .iter()
+        .rev()
+        .filter_map(|layer| layer.artboard().filter(|board| board.page.is_some()).map(|board| (layer.id, layer.name.clone(), board.rect)))
+        .collect()
+}
+
 /// Only loose root layers can use Multipage's explicit page association.
 /// Children of artboards already have structural ownership and stay clipped.
 fn loose_page_targets(doc: &photocraft_doc::Document, selected: &[LayerId]) -> Vec<LayerId> {
@@ -85,6 +95,21 @@ fn multipage_panel_targets_only_loose_root_layers_and_tracks_owner() {
     assert_eq!(loose_page_owner(&s.active().unwrap().doc, loose_id), None);
 }
 
+
+#[cfg(test)]
+#[test]
+fn multipage_panel_shows_only_explicit_pages_and_keeps_legacy_artboards_out() {
+    let mut s = photocraft_engine::Session::new();
+    s.execute("file.new", json!({"width": 100, "height": 80, "background": "transparent"})).unwrap();
+    let legacy = s.execute("layer.new.artboard", json!({"rect": [0, 0, 100, 80], "name": "Legacy"})).unwrap()["layer"].as_u64().unwrap();
+    let first = s.execute("layer.new.artboard", json!({"rect": [200, 0, 100, 80], "page": true, "name": "Page 1"})).unwrap()["layer"].as_u64().unwrap();
+    let second = s.execute("layer.artboard.addBeside", json!({"layer": first, "side": "right", "pageOrder": "after"})).unwrap()["layer"].as_u64().unwrap();
+    let doc = &s.active().unwrap().doc;
+    let ids: Vec<_> = multipage_page_rows(doc).iter().map(|row| row.0).collect();
+    assert_eq!(ids, vec![LayerId(first), LayerId(second)]);
+    assert!(!ids.contains(&LayerId(legacy)));
+    assert!(doc.layer(LayerId(legacy)).unwrap().artboard().unwrap().page.is_none());
+}
 // ----------------------------------------------------------------------------- layers
 
 /// The simple themes' single lock button. On the Background it converts the layer to a normal
@@ -199,8 +224,8 @@ pub(super) fn layers(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     // Multipage uses persistent artboards as pages. Keep controls beside the
     // existing Layers tree so page selection and layer editing stay in sync.
     if app.ui.workspace == "Multipage" {
-        let boards: Vec<_> = doc.layers.iter().rev().filter_map(|layer| layer.artboard().map(|board| (layer.id, layer.name.clone(), board.rect))).collect();
-        let selected = active.and_then(|id| doc.artboard_of(id));
+        let boards = multipage_page_rows(&doc);
+        let selected = active.and_then(|id| doc.artboard_of(id)).filter(|id| boards.iter().any(|(page_id, _, _)| page_id == id));
         let selected_pos = selected.and_then(|id| boards.iter().position(|(page_id, _, _)| *page_id == id));
         ui.heading("Pages");
         ui.horizontal_wrapped(|ui| {
