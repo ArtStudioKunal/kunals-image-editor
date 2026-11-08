@@ -126,6 +126,52 @@ pub fn fit_artboard(app: &mut PhotocraftApp) -> Result<Value, String> {
     Ok(json!({"zoom": v.zoom, "artboard": id.0, "bounds": [b.x0, b.y0, b.x1, b.y1]}))
 }
 
+/// Centre and fit all native Multipage pages and visible root pasteboard artwork,
+/// including negative document coordinates. This changes only the camera: page
+/// order, page geometry, object coordinates and export bounds are untouched.
+pub fn fit_pasteboard(app: &mut PhotocraftApp) -> Result<Value, String> {
+    if app.ui.workspace != "Multipage" {
+        return Err("Fit Pasteboard is available only in Multipage".into());
+    }
+    let idx = app.session.active_index().ok_or("no document")?;
+    let inventory = app.session.execute("multipage.page.list", json!({})).map_err(|e| e.to_string())?;
+    if inventory["pages"].as_array().is_none_or(Vec::is_empty) {
+        return Err("the document has no Multipage pages".into());
+    }
+    let bounds = inventory["workspaceBounds"].as_array().ok_or("missing workspace bounds")?;
+    let axis = |index: usize| -> Result<i32, String> {
+        let value = bounds.get(index).and_then(Value::as_i64).ok_or("invalid workspace bounds")?;
+        i32::try_from(value).map_err(|_| "workspace coordinate out of range".into())
+    };
+    let (x0, y0, x1, y1) = (axis(0)?, axis(1)?, axis(2)?, axis(3)?);
+    if x1 <= x0 || y1 <= y0 {
+        return Err("empty workspace bounds".into());
+    }
+    let size = {
+        let doc = &app.session.active().ok_or("no document")?.doc;
+        [doc.size.width, doc.size.height]
+    };
+    let area = app.last_canvas_rect.size();
+    let area = if area.x > 50.0 && area.y > 50.0 { area } else { egui::vec2(1200.0, 800.0) };
+    let ppp = app.canvas_ppp();
+    let width = (f64::from(x1) - f64::from(x0)) as f32;
+    let height = (f64::from(y1) - f64::from(y0)) as f32;
+    let v = &mut app.ui.views[idx];
+    v.zoom = ((area.x - 60.0).max(1.0) / width)
+        .min((area.y - 80.0).max(1.0) / height)
+        .min(1.0)
+        * ppp;
+    v.zoom = crate::zoom_levels::clamp(v.zoom, size);
+    v.center = [
+        ((f64::from(x0) + f64::from(x1)) / 2.0) as f32,
+        ((f64::from(y0) + f64::from(y1)) / 2.0) as f32,
+    ];
+    v.fit_pending = false;
+    v.request_zoom_animation(app.session.prefs().general.animated_zoom);
+    v.zoom_anchor = None;
+    Ok(json!({"bounds": [x0, y0, x1, y1], "zoom": v.zoom}))
+}
+
 /// Properties panel for an artboard.
 pub fn properties(app: &mut PhotocraftApp, ui: &mut egui::Ui, layer: &Layer) {
     let Some(a) = layer.artboard().cloned() else { return };
@@ -395,6 +441,30 @@ mod tests {
             let c = app.ui.views[i].center;
             assert_eq!(c, [want[0] as f32, want[1] as f32], "{params}");
         }
+    }
+
+
+    #[test]
+    fn fit_pasteboard_includes_negative_artwork_without_moving_pages() {
+        let (mut app, _) = app();
+        assert!(fit_pasteboard(&mut app).is_err(), "fit requires Multipage mode");
+        app.ui.workspace = "Multipage".into();
+        assert!(fit_pasteboard(&mut app).is_err(), "fit requires a native page");
+        app.run("layer.new.artboard", json!({"rect": [100, 50, 60, 40], "page": true})).unwrap();
+        app.session
+            .edit("Stage Pasteboard Artwork", |doc, _| {
+                let mut layer = photocraft_doc::Layer::raster("Off-page", doc.pixel_format());
+                layer.surface_mut().unwrap().fill_rect(photocraft_geom::Rect::new(-40, -20, -20, 0), &[1.0, 0.0, 0.0, 1.0]);
+                doc.layers.push(layer);
+                Ok(())
+            })
+            .unwrap();
+        let original = app.session.active().unwrap().doc.artboards()[0].2.rect;
+        let result = fit_pasteboard(&mut app).unwrap();
+        assert_eq!(result["bounds"], json!([-40, -20, 160, 90]));
+        let idx = app.session.active_index().unwrap();
+        assert_eq!(app.ui.views[idx].center, [60.0, 35.0]);
+        assert_eq!(app.session.active().unwrap().doc.artboards()[0].2.rect, original);
     }
 
     fn drag(app: &mut PhotocraftApp, from: [f64; 2], by: [f64; 2], mods: egui::Modifiers) {

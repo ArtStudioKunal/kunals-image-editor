@@ -228,6 +228,14 @@ pub(super) fn layers(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
         let selected_pos = selected.and_then(|id| boards.iter().position(|(page_id, _, _)| *page_id == id));
         ui.heading("Pages");
         ui.horizontal_wrapped(|ui| {
+            if ui.button("Fit Pasteboard").on_hover_text("Show all pages and visible off-page artwork").clicked()
+                && let Err(e) = crate::artboard_ui::fit_pasteboard(app)
+            {
+                app.ui.status = e;
+                app.ui.status_error = true;
+            }
+        });
+        ui.horizontal_wrapped(|ui| {
             if ui.button("+ Page").clicked() {
                 actions.push(if let Some(id) = selected {
                     ("layer.artboard.addBeside".into(), json!({"layer": id.0, "side": "right", "pageOrder": "after"}))
