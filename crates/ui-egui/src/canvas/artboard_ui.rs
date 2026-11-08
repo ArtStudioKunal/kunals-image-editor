@@ -157,15 +157,9 @@ pub fn fit_pasteboard(app: &mut PhotocraftApp) -> Result<Value, String> {
     let width = (f64::from(x1) - f64::from(x0)) as f32;
     let height = (f64::from(y1) - f64::from(y0)) as f32;
     let v = &mut app.ui.views[idx];
-    v.zoom = ((area.x - 60.0).max(1.0) / width)
-        .min((area.y - 80.0).max(1.0) / height)
-        .min(1.0)
-        * ppp;
+    v.zoom = ((area.x - 60.0).max(1.0) / width).min((area.y - 80.0).max(1.0) / height).min(1.0) * ppp;
     v.zoom = crate::zoom_levels::clamp(v.zoom, size);
-    v.center = [
-        ((f64::from(x0) + f64::from(x1)) / 2.0) as f32,
-        ((f64::from(y0) + f64::from(y1)) / 2.0) as f32,
-    ];
+    v.center = [((f64::from(x0) + f64::from(x1)) / 2.0) as f32, ((f64::from(y0) + f64::from(y1)) / 2.0) as f32];
     v.fit_pending = false;
     v.request_zoom_animation(app.session.prefs().general.animated_zoom);
     v.zoom_anchor = None;
@@ -442,7 +436,6 @@ mod tests {
             assert_eq!(c, [want[0] as f32, want[1] as f32], "{params}");
         }
     }
-
 
     #[test]
     fn fit_pasteboard_includes_negative_artwork_without_moving_pages() {

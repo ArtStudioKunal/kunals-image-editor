@@ -233,12 +233,17 @@ jobs:
       # warm, each Windows leg built 4.5 min faster. Like rust-cache, only main writes (PRs read
       # main's entries); a full set is ~90 MB, so it barely touches the 10 GB budget (#2688).
       # Test executables can't be cached, so a PR still links its tests.
+      # Compiler caching is an optimization, never a prerequisite for testing.
+      # GitHub release assets can return HTTP 504; continue without the wrapper.
       - name: Install sccache
+        id: sccache
+        continue-on-error: true
         uses: Mozilla-Actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
         with:
           version: v0.18.0
 
       - name: Use sccache
+        if: steps.sccache.outcome == 'success'
         env:
           MAIN: ${{ github.ref == 'refs/heads/main' }}
         run: |
@@ -379,8 +384,12 @@ jobs:
           cache-on-failure: true
       - name: Install trunk
         run: |
-          curl --proto '=https' -fsSL "https://github.com/trunk-rs/trunk/releases/download/v${TRUNK_VERSION}/trunk-x86_64-unknown-linux-gnu.tar.gz" \
-            | tar -xz -C "$HOME/.cargo/bin" trunk
+          archive="$RUNNER_TEMP/trunk.tar.gz"
+          curl --proto '=https' --retry 5 --retry-all-errors --retry-delay 3 \
+            --connect-timeout 20 -fsSL \
+            "https://github.com/trunk-rs/trunk/releases/download/v${TRUNK_VERSION}/trunk-x86_64-unknown-linux-gnu.tar.gz" \
+            -o "$archive"
+          tar -xz -C "$HOME/.cargo/bin" -f "$archive" trunk
           trunk --version
       # package.sh runs Trunk's release builds, validates relative URLs, cuts the wasm into
       # parts, checks the 24 MiB per-file limit and exercises the packaging step release.yml uses.
