@@ -931,7 +931,36 @@ fn list_pages(s: &mut Session, _p: &Value) -> Result<Value> {
         .flat_map(|page| page.owned_layers.iter().copied())
         .collect();
     let unassigned: Vec<u64> = doc.layers.iter().filter(|layer| layer.artboard().is_none() && !owned.contains(&layer.id)).map(|layer| layer.id.0).collect();
-    Ok(json!({"pages": pages, "unassignedLayers": unassigned}))
+    // Keep workspace geometry separate from the document's export bounds.
+    // Root raster artwork may live at negative coordinates, entirely outside
+    // the image, and must be discoverable without changing page ownership.
+    let mut workspace: Option<Rect> = None;
+    let mut include = |rect: Rect| {
+        if rect.is_empty() {
+            return;
+        }
+        workspace = Some(match workspace {
+            Some(b) => Rect::new(b.x0.min(rect.x0), b.y0.min(rect.y0), b.x1.max(rect.x1), b.y1.max(rect.y1)),
+            None => rect,
+        });
+    };
+    for layer in &doc.layers {
+        if let Some(board) = layer.artboard() {
+            include(board.rect);
+        } else if layer.visible && !doc.is_background(layer.id) {
+            // Raster content bounds are not clipped to doc.bounds(); off-page
+            // tiles remain visible in the inventory even at negative X or Y.
+            if let Some(surface) = layer.surface() {
+                include(surface.content_bounds());
+            }
+        }
+    }
+    let workspace = workspace.unwrap_or_else(|| doc.bounds());
+    Ok(json!({
+        "pages": pages,
+        "unassignedLayers": unassigned,
+        "workspaceBounds": [workspace.x0, workspace.y0, workspace.x1, workspace.y1],
+    }))
 }
 
 pub fn specs() -> Vec<CommandSpec> {
@@ -962,7 +991,7 @@ pub fn specs() -> Vec<CommandSpec> {
             label: "List Multipage Pages and Pasteboard Objects",
             menu: &[],
             shortcut: None,
-            params: r##"{} → {pages:[{id,name,rect,margins,bleed,ownedLayers}],unassignedLayers:[ids]} (read-only; PDF reading order, stable page ids)"##,
+            params: r##"{} → {pages:[{id,name,rect,margins,bleed,ownedLayers}],unassignedLayers:[ids],workspaceBounds:[x0,y0,x1,y1]} (read-only; includes off-canvas raster artwork)"##,
             enabled: has_doc,
             journal: false,
             run: list_pages,

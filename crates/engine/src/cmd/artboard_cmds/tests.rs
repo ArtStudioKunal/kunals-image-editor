@@ -1028,6 +1028,10 @@ fn multipage_page_inventory_preserves_reading_order_workspace_positions_and_loos
     assert_eq!(inventory["pages"][0]["bleed"], json!([2, 2, 2, 2]));
     assert_eq!(inventory["pages"][0]["ownedLayers"], json!([assigned.0]));
     assert_eq!(inventory["pages"][1]["id"], second);
+    assert_eq!(inventory["workspaceBounds"][0], -10);
+    assert_eq!(inventory["workspaceBounds"][1], 0);
+    assert!(inventory["workspaceBounds"][2].as_i64().unwrap() >= 200);
+    assert_eq!(inventory["workspaceBounds"][3], 80);
     assert!(inventory["unassignedLayers"].as_array().unwrap().contains(&json!(unassigned.0)));
     assert!(!inventory["unassignedLayers"].as_array().unwrap().contains(&json!(assigned.0)));
 
@@ -1067,4 +1071,25 @@ fn multipage_delete_and_reorder_ignore_legacy_artboards() {
     assert!(doc(&s).layer(LayerId(legacy)).is_some(), "deleting a page must not remove legacy artboards");
     s.undo();
     assert!(doc(&s).layer(LayerId(first)).is_some());
+}
+
+#[test]
+fn multipage_workspace_bounds_include_negative_pasteboard_artwork_and_ignore_hidden_layers() {
+    let mut s = session(8);
+    let visible = add_square(&mut s, Rect::new(-45, -30, -25, -10), [1.0, 0.0, 0.0, 1.0]);
+    let hidden = add_square(&mut s, Rect::new(-200, -200, -180, -180), [0.0, 1.0, 0.0, 1.0]);
+    s.execute("layer.setProps", json!({"layer": hidden.0, "visible": false})).unwrap();
+    let page = s.execute("layer.new.artboard", json!({"rect": [100, 50, 60, 40], "page": true})).unwrap()["layer"].as_u64().unwrap();
+
+    let before = s.execute("multipage.page.list", json!({})).unwrap();
+    assert_eq!(before["workspaceBounds"], json!([-45, -30, 160, 90]));
+    s.execute("multipage.page.setOwner", json!({"layer": visible.0, "page": page})).unwrap();
+    let owned = s.execute("multipage.page.list", json!({})).unwrap();
+    assert_eq!(owned["workspaceBounds"], before["workspaceBounds"], "page ownership must not change pasteboard geometry");
+
+    s.execute("layer.translate", json!({"layer": visible.0, "dx": 50, "dy": 40})).unwrap();
+    let moved = s.execute("multipage.page.list", json!({})).unwrap();
+    assert_eq!(moved["workspaceBounds"], json!([5, 10, 160, 90]));
+    s.undo();
+    assert_eq!(s.execute("multipage.page.list", json!({})).unwrap()["workspaceBounds"], before["workspaceBounds"]);
 }
