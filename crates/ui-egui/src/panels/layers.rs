@@ -95,7 +95,6 @@ fn multipage_panel_targets_only_loose_root_layers_and_tracks_owner() {
     assert_eq!(loose_page_owner(&s.active().unwrap().doc, loose_id), None);
 }
 
-
 #[cfg(test)]
 #[test]
 fn multipage_panel_shows_only_explicit_pages_and_keeps_legacy_artboards_out() {

@@ -889,7 +889,8 @@ fn reorder_page(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(bad(cmd, "step must be next or previous"));
     }
     let d = s.active().ok_or(EngineError::NoDocument)?;
-    let positions: Vec<usize> = d.doc.layers.iter().enumerate().filter(|(_, layer)| layer.artboard().is_some_and(|board| board.page.is_some())).map(|(i, _)| i).collect();
+    let positions: Vec<usize> =
+        d.doc.layers.iter().enumerate().filter(|(_, layer)| layer.artboard().is_some_and(|board| board.page.is_some())).map(|(i, _)| i).collect();
     let index = positions.iter().position(|i| d.doc.layers[*i].id == id).ok_or_else(|| bad(cmd, "the layer is not a Multipage page"))?;
     // Root layers are bottom-to-top; the Pages panel and PDF export are top-to-bottom.
     // "previous" means a higher root index and "next" a lower one.

@@ -753,13 +753,13 @@ fn multipage_adjacent_pages_can_be_added_on_both_sides_and_undone() {
 #[test]
 fn multipage_delete_and_reorder_are_undoable() {
     let mut s = session(8);
-    let first = s.execute("layer.new.artboard", json!({"rect": [0, 0, 100, 80]})).unwrap();
+    let first = s.execute("layer.new.artboard", json!({"rect": [0, 0, 100, 80], "page": true})).unwrap();
     let a = first["layer"].as_u64().unwrap();
-    let second = s.execute("layer.artboard.addBeside", json!({"layer": a, "side": "right"})).unwrap();
+    let second = s.execute("layer.artboard.addBeside", json!({"layer": a, "side": "right", "pageOrder": "after"})).unwrap();
     let b = second["layer"].as_u64().unwrap();
     assert_eq!(doc(&s).artboards().len(), 2);
     let original: Vec<LayerId> = doc(&s).layers.iter().filter(|l| l.artboard().is_some()).map(|l| l.id).collect();
-    s.execute("multipage.page.reorder", json!({"layer": a, "step": "previous"})).unwrap();
+    s.execute("multipage.page.reorder", json!({"layer": a, "step": "next"})).unwrap();
     let reordered: Vec<LayerId> = doc(&s).layers.iter().filter(|l| l.artboard().is_some()).map(|l| l.id).collect();
     assert_eq!(reordered, original.iter().rev().copied().collect::<Vec<_>>());
     s.undo();
@@ -778,7 +778,7 @@ fn multipage_delete_and_reorder_are_undoable() {
 #[test]
 fn multipage_insert_before_after_and_reorder_match_export_order() {
     let mut s = session(8);
-    let first = s.execute("layer.new.artboard", json!({"rect": [0, 0, 30, 40]})).unwrap()["layer"].as_u64().unwrap();
+    let first = s.execute("layer.new.artboard", json!({"rect": [0, 0, 30, 40], "page": true})).unwrap()["layer"].as_u64().unwrap();
     let after = s.execute("layer.artboard.addBeside", json!({"layer": first, "side": "right", "pageOrder": "after"})).unwrap();
     let after = after["layer"].as_u64().unwrap();
     assert_eq!(chosen_artboards(doc(&s), &json!({})), vec![LayerId(first), LayerId(after)]);
