@@ -391,6 +391,13 @@ jobs:
             -o "$archive"
           tar -xz -C "$HOME/.cargo/bin" -f "$archive" trunk
           trunk --version
+      # Trunk checks Cargo.lock (wasm-bindgen 0.2.129). Installing the
+      # matching CLI from crates.io avoids Trunk's GitHub release-asset
+      # download, which has intermittently returned HTTP 503.
+      - name: Install pinned wasm-bindgen CLI
+        run: |
+          cargo install wasm-bindgen-cli --version 0.2.129 --locked
+          wasm-bindgen --version
       # package.sh runs Trunk's release builds, validates relative URLs, cuts the wasm into
       # parts, checks the 24 MiB per-file limit and exercises the packaging step release.yml uses.
       - name: Build and verify browser release
