@@ -341,6 +341,12 @@ pub(super) fn layers(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                 );
                 let label = format!("{} · {} ({} × {})", index + 1, name, rect.width(), rect.height());
                 let row = ui.selectable_label(is_selected, label);
+                if ui.small_button("View").on_hover_text("Fit this page in the canvas without changing its selection or position").clicked()
+                    && let Err(e) = crate::artboard_ui::fit_page(app, *id)
+                {
+                    app.ui.status = e;
+                    app.ui.status_error = true;
+                }
                 if row.clicked() {
                     actions.push(("layer.select".into(), json!({"layer": id.0})));
                 }

@@ -107,7 +107,23 @@ pub fn fit_artboard(app: &mut PhotocraftApp) -> Result<Value, String> {
     let i = app.session.active_index().ok_or("no document")?;
     let st = app.session.active().ok_or("no document")?;
     let id = st.active_layer.and_then(|l| st.doc.artboard_of(l)).or_else(|| st.doc.artboards().last().map(|b| b.0)).ok_or("the document has no artboards")?;
-    let b = st.doc.layer(id).and_then(Layer::artboard).map(|a| a.rect).ok_or("no artboard")?;
+    fit_board(app, id)
+}
+
+/// Navigate to a native Multipage page without changing the active layer or page order.
+pub fn fit_page(app: &mut PhotocraftApp, id: photocraft_doc::LayerId) -> Result<Value, String> {
+    let st = app.session.active().ok_or("no document")?;
+    if app.ui.workspace != "Multipage" || !st.doc.layer(id).and_then(Layer::artboard).is_some_and(|board| board.page.is_some()) {
+        return Err("not a Multipage page".into());
+    }
+    fit_board(app, id)
+}
+
+/// Shared camera operation. View > Fit Artboard continues supporting legacy artboards.
+fn fit_board(app: &mut PhotocraftApp, id: photocraft_doc::LayerId) -> Result<Value, String> {
+    let i = app.session.active_index().ok_or("no document")?;
+    let st = app.session.active().ok_or("no document")?;
+    let b = st.doc.layer(id).and_then(Layer::artboard).map(|board| board.rect).ok_or("no artboard")?;
     let size = [st.doc.size.width, st.doc.size.height];
     let area = app.last_canvas_rect.size();
     let area = if area.x > 50.0 { area } else { egui::vec2(1200.0, 800.0) };
@@ -435,6 +451,26 @@ mod tests {
             let c = app.ui.views[i].center;
             assert_eq!(c, [want[0] as f32, want[1] as f32], "{params}");
         }
+    }
+
+    #[test]
+    fn fit_page_navigates_to_explicit_page_without_changing_selection() {
+        let (mut app, _) = app();
+        app.ui.workspace = "Multipage".into();
+        let first = app.run("layer.new.artboard", json!({"rect": [0, 0, 50, 40], "page": true})).unwrap()["layer"].as_u64().unwrap();
+        let second = app.run("layer.new.artboard", json!({"rect": [-400, -200, 80, 60], "page": true})).unwrap()["layer"].as_u64().unwrap();
+        let before = app.session.active().unwrap().doc.artboards().iter().map(|(id, _, board)| (*id, board.rect)).collect::<Vec<_>>();
+        let active = app.session.active().unwrap().active_layer;
+        let result = fit_page(&mut app, photocraft_doc::LayerId(first)).unwrap();
+        assert_eq!(result["bounds"], json!([0, 0, 50, 40]));
+        let index = app.session.active_index().unwrap();
+        assert_eq!(app.ui.views[index].center, [25.0, 20.0]);
+        let result = fit_page(&mut app, photocraft_doc::LayerId(second)).unwrap();
+        assert_eq!(result["bounds"], json!([-400, -200, -320, -140]));
+        assert_eq!(app.ui.views[index].center, [-360.0, -170.0]);
+        assert_eq!(app.session.active().unwrap().active_layer, active);
+        assert_eq!(app.session.active().unwrap().doc.artboards().iter().map(|(id, _, board)| (*id, board.rect)).collect::<Vec<_>>(), before);
+        assert!(fit_page(&mut app, photocraft_doc::LayerId(999_999)).is_err());
     }
 
     #[test]
