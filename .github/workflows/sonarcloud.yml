@@ -16,8 +16,10 @@ concurrency:
 
 jobs:
   sonarcloud:
-    # Track shared CI improvements on main.
-    uses: storytold/craft-common-actions/.github/workflows/sonarcloud.yml@main
+    # Pin the last proven working reusable workflow. Following @main caused a
+    # no-jobs workflow failure after an upstream change (CI run 42674506192).
+    # Upgrade deliberately after validating the newer shared revision.
+    uses: storytold/craft-common-actions/.github/workflows/sonarcloud.yml@8e9b8b96c5d64c54eba462f5e8cac196787e744d # last confirmed working shared revision
     with:
       timeout-minutes: 120
       fonts-ref: b076417b5880bd4154bd22f00695b1d28c6bea83
