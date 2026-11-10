@@ -104,7 +104,6 @@ pub fn draw_frames(app: &PhotocraftApp, painter: &egui::Painter, xf: &ViewXform)
 
 /// View › Fit Artboard on Screen: zoom to the active artboard (or the first one).
 pub fn fit_artboard(app: &mut PhotocraftApp) -> Result<Value, String> {
-    let i = app.session.active_index().ok_or("no document")?;
     let st = app.session.active().ok_or("no document")?;
     let id = st.active_layer.and_then(|l| st.doc.artboard_of(l)).or_else(|| st.doc.artboards().last().map(|b| b.0)).ok_or("the document has no artboards")?;
     fit_board(app, id)
