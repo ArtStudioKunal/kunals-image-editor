@@ -460,14 +460,21 @@ mod tests {
         let second = app.run("layer.new.artboard", json!({"rect": [-400, -200, 80, 60], "page": true})).unwrap()["layer"].as_u64().unwrap();
         let before = app.session.active().unwrap().doc.artboards().iter().map(|(id, _, board)| (*id, board.rect)).collect::<Vec<_>>();
         let active = app.session.active().unwrap().active_layer;
-        let result = fit_page(&mut app, photocraft_doc::LayerId(first)).unwrap();
-        assert_eq!(result["bounds"], json!([0, 0, 50, 40]));
+        // The artboard insertion command may reposition pages to avoid overlap.
+        // Navigation must fit their *stored* geometry, not the requested rects.
+        let rects = [first, second].map(|id| app.session.active().unwrap().doc.layer(photocraft_doc::LayerId(id)).unwrap().artboard().unwrap().rect);
+        assert_ne!(rects[0], rects[1]);
         let index = app.session.active_index().unwrap();
-        assert_eq!(app.ui.views[index].center, [25.0, 20.0]);
-        let result = fit_page(&mut app, photocraft_doc::LayerId(second)).unwrap();
-        assert_eq!(result["bounds"], json!([-400, -200, -320, -140]));
-        assert_eq!(app.ui.views[index].center, [-360.0, -170.0]);
-        assert_eq!(app.session.active().unwrap().active_layer, active);
+        for (id, rect) in [(first, rects[0]), (second, rects[1])] {
+            let result = fit_page(&mut app, photocraft_doc::LayerId(id)).unwrap();
+            assert_eq!(result["artboard"], json!(id));
+            assert_eq!(result["bounds"], json!([rect.x0, rect.y0, rect.x1, rect.y1]));
+            assert_eq!(
+                app.ui.views[index].center,
+                [((f64::from(rect.x0) + f64::from(rect.x1)) / 2.0) as f32, ((f64::from(rect.y0) + f64::from(rect.y1)) / 2.0) as f32]
+            );
+            assert_eq!(app.session.active().unwrap().active_layer, active);
+        }
         assert_eq!(app.session.active().unwrap().doc.artboards().iter().map(|(id, _, board)| (*id, board.rect)).collect::<Vec<_>>(), before);
         assert!(fit_page(&mut app, photocraft_doc::LayerId(999_999)).is_err());
     }
