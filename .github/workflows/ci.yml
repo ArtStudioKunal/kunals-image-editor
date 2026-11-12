@@ -360,6 +360,68 @@ jobs:
       - name: Corpus tests
         run: cargo xtask test-corpus
 
+  # Downloadable Windows development executable for KimagePro. Keep this
+  # separate from the Windows test matrix and the release/installer workflows.
+  # This builds only the GUI executable and never signs or publishes a release.
+  windows-exe:
+    name: KimagePro Windows EXE (unsigned development build)
+    if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
+    timeout-minutes: 120
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Check out pinned fonts
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: storytold/craft-fonts
+          ref: b076417b5880bd4154bd22f00695b1d28c6bea83
+          path: craft-fonts
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          targets: x86_64-pc-windows-msvc
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          key: kimagepro-windows-exe
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: Build Windows GUI executable
+        shell: pwsh
+        env:
+          CRAFT_FONTS_DIR: ${{ github.workspace }}/craft-fonts
+          CRAFT_FONTS_REQUIRED: "1"
+          PHOTOCRAFT_REQUIRE_WINRES: "1"
+          PHOTOCRAFT_BUILD_SHA: ${{ github.sha }}
+        run: |
+          cargo build --release --locked --package photocraft --features heif --target x86_64-pc-windows-msvc
+          if ($LASTEXITCODE -ne 0) { throw "KimagePro Windows build failed." }
+      - name: Stage and verify KimagePro.exe
+        shell: pwsh
+        run: |
+          $source = 'target/x86_64-pc-windows-msvc/release/photocraft.exe'
+          if (-not (Test-Path -LiteralPath $source)) { throw "Expected GUI executable not found: $source" }
+          $stage = 'dist/kimagepro-windows-exe'
+          New-Item -ItemType Directory -Path $stage -Force | Out-Null
+          Copy-Item -LiteralPath $source -Destination (Join-Path $stage 'KimagePro.exe')
+          Copy-Item -LiteralPath 'NOTICE', 'ATTRIBUTION.md' -Destination $stage
+          $exe = Join-Path $stage 'KimagePro.exe'
+          $bytes = [System.IO.File]::ReadAllBytes((Resolve-Path $exe))
+          $pe = [BitConverter]::ToInt32($bytes, 0x3c)
+          $machine = [BitConverter]::ToUInt16($bytes, $pe + 4)
+          $subsystem = [BitConverter]::ToUInt16($bytes, $pe + 0x5c)
+          if ($machine -ne 0x8664 -or $subsystem -ne 2) { throw "Not a Windows x64 GUI PE (machine=$machine subsystem=$subsystem)" }
+          "Unsigned Windows x64 development build from commit ${{ github.sha }}. Not a release or installer." |
+            Set-Content -Path (Join-Path $stage 'DEVELOPMENT-BUILD.txt')
+          Write-Host "Verified x64 Windows GUI executable: $exe"
+      - name: Upload downloadable EXE
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: KimagePro-Windows-x64-EXE-${{ github.run_number }}
+          path: dist/kimagepro-windows-exe/
+          if-no-files-found: error
+          retention-days: 14
+
   web:
     timeout-minutes: 60
     name: web build and wasm size gate
