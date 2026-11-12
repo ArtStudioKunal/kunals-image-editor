@@ -880,6 +880,26 @@ fn delete_page(s: &mut Session, p: &Value) -> Result<Value> {
     Ok(json!({"deleted": id.0}))
 }
 
+/// Change only a native page's position in workspace coordinates. Page
+/// placement is distinct from reading order and from explicitly owned loose
+/// artwork: neither the page's children nor loose layers are translated.
+fn place_page(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "multipage.page.place";
+    let id = p.get("layer").and_then(Value::as_u64).map(LayerId).ok_or_else(|| bad(cmd, "page layer id is required"))?;
+    let x = p.get("x").and_then(Value::as_i64).ok_or_else(|| bad(cmd, "x must be an integer"))?;
+    let y = p.get("y").and_then(Value::as_i64).ok_or_else(|| bad(cmd, "y must be an integer"))?;
+    let st = s.active().ok_or(EngineError::NoDocument)?;
+    let page = st.doc.layers.iter().find(|l| l.id == id).and_then(Layer::artboard).filter(|board| board.page.is_some()).ok_or_else(|| bad(cmd, "layer must be a native Multipage page"))?;
+    let rect = board_rect(cmd, [x, y, i64::from(page.rect.width()), i64::from(page.rect.height())])?;
+    if rect == page.rect {
+        return Ok(json!({"layer": id.0, "rect": [rect.x0, rect.y0, rect.width(), rect.height()], "moved": false}));
+    }
+    // Reuse the existing checked, atomic, undoable geometry operation; with
+    // moveContents:false, page placement cannot translate editable contents.
+    set_props(s, &json!({"layer": id.0, "x": x, "y": y, "moveContents": false}))?;
+    Ok(json!({"layer": id.0, "rect": [rect.x0, rect.y0, rect.width(), rect.height()], "moved": true}))
+}
+
 /// Reorder the top-level page stack without changing its canvas coordinates.
 fn reorder_page(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "multipage.page.reorder";
@@ -1007,6 +1027,14 @@ pub fn specs() -> Vec<CommandSpec> {
             run: owner_of,
         },
         spec!("multipage.page.delete", "Delete Page", &[], r##"{"layer":id?} → {deleted}"##, has_active_artboard, delete_page),
+        spec!(
+            "multipage.page.place",
+            "Place Page on Pasteboard",
+            &[],
+            r##"{"layer":pageId,"x":integer,"y":integer} → {layer,rect,moved} (absolute workspace coordinates; page order and artwork positions unchanged)"##,
+            has_doc,
+            place_page
+        ),
         spec!(
             "multipage.page.reorder",
             "Reorder Page",

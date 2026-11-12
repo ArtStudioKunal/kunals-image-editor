@@ -1011,6 +1011,56 @@ fn multipage_bulk_page_ownership_is_atomic_undoable_and_keeps_loose_coordinates(
 }
 
 #[test]
+fn multipage_page_placement_preserves_loose_artwork_order_and_native_roundtrip() {
+    let mut s = session(8);
+    let loose = add_square(&mut s, Rect::new(-40, -20, -20, 0), [1.0, 0.0, 0.0, 1.0]);
+    let unassigned = add_square(&mut s, Rect::new(130, 10, 145, 25), [0.0, 0.0, 1.0, 1.0]);
+    let first = s.execute("layer.new.artboard", json!({"rect": [0, 0, 100, 80], "page": true, "name": "Cover"})).unwrap()["layer"].as_u64().unwrap();
+    let second = s.execute("layer.artboard.addBeside", json!({"layer": first, "side": "right", "pageOrder": "after"})).unwrap()["layer"].as_u64().unwrap();
+    s.execute("multipage.page.setOwner", json!({"layer": loose.0, "page": first})).unwrap();
+    let pages_before = s.execute("multipage.page.list", json!({})).unwrap();
+    let first_rect = doc(&s).layer(LayerId(first)).unwrap().artboard().unwrap().rect;
+    let other_rect = doc(&s).layer(LayerId(second)).unwrap().artboard().unwrap().rect;
+    let layer_bounds = [loose, unassigned].map(|id| doc(&s).layer(id).unwrap().surface().unwrap().content_bounds());
+
+    // Move to a negative workspace coordinate while keeping the page size.
+    let placed = s.execute("multipage.page.place", json!({"layer": first, "x": -250, "y": -125})).unwrap();
+    assert_eq!(placed["rect"], json!([-250, -125, 100, 80]));
+    assert_eq!(placed["moved"], true);
+    let pages_after = s.execute("multipage.page.list", json!({})).unwrap();
+    assert_eq!(pages_after["pages"][0]["id"], pages_before["pages"][0]["id"]);
+    assert_eq!(pages_after["pages"][1]["id"], pages_before["pages"][1]["id"]);
+    assert_eq!(pages_after["pages"][0]["ownedLayers"], json!([loose.0]));
+    assert_eq!(doc(&s).layer(LayerId(second)).unwrap().artboard().unwrap().rect, other_rect);
+    for (id, expected) in [loose, unassigned].into_iter().zip(layer_bounds) {
+        assert_eq!(doc(&s).layer(id).unwrap().surface().unwrap().content_bounds(), expected);
+    }
+    assert_eq!(s.execute("multipage.page.ownerOf", json!({"layer": loose.0})).unwrap()["page"], json!(first));
+    assert_eq!(s.execute("multipage.page.place", json!({"layer": first, "x": -250, "y": -125})).unwrap()["moved"], false);
+
+    let encoded = photocraft_io::export(doc(&s), "page-placement.pcraft", &photocraft_io::ExportOptions::default()).unwrap();
+    let restored = photocraft_io::import("page-placement.pcraft", &encoded.bytes).unwrap().document;
+    assert_eq!(restored.layer(LayerId(first)).unwrap().artboard().unwrap().rect, Rect::new(-250, -125, -150, -45));
+    assert_eq!(restored.layer(LayerId(second)).unwrap().artboard().unwrap().rect, other_rect);
+    assert_eq!(restored.layer(LayerId(first)).unwrap().artboard().unwrap().page.as_ref().unwrap().owned_layers, vec![loose]);
+    for (id, expected) in [loose, unassigned].into_iter().zip(layer_bounds) {
+        assert_eq!(restored.layer(id).unwrap().surface().unwrap().content_bounds(), expected);
+    }
+
+    s.undo();
+    assert_eq!(doc(&s).layer(LayerId(first)).unwrap().artboard().unwrap().rect, first_rect);
+    for invalid in [
+        json!({"layer": first, "x": 0.5, "y": 0}),
+        json!({"layer": first, "x": i32::MAX, "y": 0}),
+        json!({"layer": 999999u64, "x": 0, "y": 0}),
+    ] {
+        let before = doc(&s).clone();
+        assert!(s.execute("multipage.page.place", invalid).is_err());
+        assert_eq!(doc(&s), &before);
+    }
+}
+
+#[test]
 fn multipage_page_inventory_preserves_reading_order_workspace_positions_and_loose_ownership() {
     let mut s = session(8);
     let assigned = add_square(&mut s, Rect::new(-10, 4, 0, 14), [1.0, 0.0, 0.0, 1.0]);
