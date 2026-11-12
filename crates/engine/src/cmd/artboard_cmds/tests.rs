@@ -1049,11 +1049,8 @@ fn multipage_page_placement_preserves_loose_artwork_order_and_native_roundtrip()
 
     s.undo();
     assert_eq!(doc(&s).layer(LayerId(first)).unwrap().artboard().unwrap().rect, first_rect);
-    for invalid in [
-        json!({"layer": first, "x": 0.5, "y": 0}),
-        json!({"layer": first, "x": i32::MAX, "y": 0}),
-        json!({"layer": 999999u64, "x": 0, "y": 0}),
-    ] {
+    assert_eq!(doc(&s).layer(LayerId(second)).unwrap().artboard().unwrap().rect, other_rect);
+    for invalid in [json!({"layer": first, "x": 0.5, "y": 0}), json!({"layer": first, "x": i32::MAX, "y": 0}), json!({"layer": 999999u64, "x": 0, "y": 0})] {
         let before = doc(&s).clone();
         assert!(s.execute("multipage.page.place", invalid).is_err());
         assert_eq!(doc(&s), &before);

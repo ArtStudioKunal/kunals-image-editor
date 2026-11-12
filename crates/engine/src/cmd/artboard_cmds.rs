@@ -889,14 +889,26 @@ fn place_page(s: &mut Session, p: &Value) -> Result<Value> {
     let x = p.get("x").and_then(Value::as_i64).ok_or_else(|| bad(cmd, "x must be an integer"))?;
     let y = p.get("y").and_then(Value::as_i64).ok_or_else(|| bad(cmd, "y must be an integer"))?;
     let st = s.active().ok_or(EngineError::NoDocument)?;
-    let page = st.doc.layers.iter().find(|l| l.id == id).and_then(Layer::artboard).filter(|board| board.page.is_some()).ok_or_else(|| bad(cmd, "layer must be a native Multipage page"))?;
+    let page = st
+        .doc
+        .layers
+        .iter()
+        .find(|l| l.id == id)
+        .and_then(Layer::artboard)
+        .filter(|board| board.page.is_some())
+        .ok_or_else(|| bad(cmd, "layer must be a native Multipage page"))?;
     let rect = board_rect(cmd, [x, y, i64::from(page.rect.width()), i64::from(page.rect.height())])?;
     if rect == page.rect {
         return Ok(json!({"layer": id.0, "rect": [rect.x0, rect.y0, rect.width(), rect.height()], "moved": false}));
     }
-    // Reuse the existing checked, atomic, undoable geometry operation; with
-    // moveContents:false, page placement cannot translate editable contents.
-    set_props(s, &json!({"layer": id.0, "x": x, "y": y, "moveContents": false}))?;
+    // Do not call set_props here: it invokes Photoshop's fit_canvas(), which
+    // translates the entire document when a board moves to negative X/Y.
+    // Multipage workspace coordinates must stay absolute and independent.
+    s.edit("Place Page on Pasteboard", |doc, _| {
+        let board = doc.layer_mut(id).and_then(Layer::artboard_mut).ok_or(EngineError::NoLayer(id))?;
+        board.rect = rect;
+        Ok(())
+    })?;
     Ok(json!({"layer": id.0, "rect": [rect.x0, rect.y0, rect.width(), rect.height()], "moved": true}))
 }
 
