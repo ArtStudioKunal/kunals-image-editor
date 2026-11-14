@@ -30,7 +30,7 @@ pub use adjust::Adjustment;
 pub use advanced::{AdvancedBlending, Knockout};
 pub use analysis::{CountGroup, Measurement, MeasurementScale, Note, Ruler};
 pub use blend_if::{BlendIf, BlendRange};
-pub use comps::{Artboard, ArtboardBackground, CompAppearance, CompLayerState, LayerComp};
+pub use comps::{Artboard, ArtboardBackground, CompAppearance, CompLayerState, LayerComp, PageLayout};
 pub use effects::{
     Bevel, BevelContour, BevelStyle, BevelTechnique, BevelTexture, Contour, Effect, FxCommon, FxPaint, GlobalLight, Glow, GlowSource, GlowTechnique, Gradient,
     GradientStyle, Satin, Shadow, StrokeFx, StrokePosition,

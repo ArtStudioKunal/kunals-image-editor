@@ -730,3 +730,413 @@ fn from_layers_defaults_are_the_selected_layers_size() {
     assert_eq!(from_layers_defaults(&s), Some(("Artboard 1".to_string(), [100, 80])), "an empty layer: the canvas");
     assert_eq!(from_layers_defaults(&Session::new()), None);
 }
+
+/// KimagePro Multipage page creation uses the existing adjacent-artboard command.
+/// Each operation is undoable and starts with an independent empty page.
+#[test]
+fn multipage_adjacent_pages_can_be_added_on_both_sides_and_undone() {
+    let mut s = session(8);
+    let first = s.execute("layer.new.artboard", json!({"rect": [0, 0, 100, 80]})).unwrap();
+    let first_id = first["layer"].as_u64().unwrap();
+    let right = s.execute("layer.artboard.addBeside", json!({"layer": first_id, "side": "right"})).unwrap();
+    assert_eq!(right["rect"], json!([200, 0, 100, 80]));
+    let left = s.execute("layer.artboard.addBeside", json!({"layer": first_id, "side": "left"})).unwrap();
+    assert_eq!(doc(&s).artboards().len(), 3);
+    assert!(left["layer"].as_u64().is_some());
+    assert!(doc(&s).size.width >= 300);
+    s.undo();
+    assert_eq!(doc(&s).artboards().len(), 2);
+    s.undo();
+    assert_eq!(doc(&s).artboards().len(), 1);
+}
+
+#[test]
+fn multipage_delete_and_reorder_are_undoable() {
+    let mut s = session(8);
+    let first = s.execute("layer.new.artboard", json!({"rect": [0, 0, 100, 80], "page": true})).unwrap();
+    let a = first["layer"].as_u64().unwrap();
+    let second = s.execute("layer.artboard.addBeside", json!({"layer": a, "side": "right", "pageOrder": "after"})).unwrap();
+    let b = second["layer"].as_u64().unwrap();
+    assert_eq!(doc(&s).artboards().len(), 2);
+    let original: Vec<LayerId> = doc(&s).layers.iter().filter(|l| l.artboard().is_some()).map(|l| l.id).collect();
+    s.execute("multipage.page.reorder", json!({"layer": a, "step": "next"})).unwrap();
+    let reordered: Vec<LayerId> = doc(&s).layers.iter().filter(|l| l.artboard().is_some()).map(|l| l.id).collect();
+    assert_eq!(reordered, original.iter().rev().copied().collect::<Vec<_>>());
+    s.undo();
+    let restored: Vec<LayerId> = doc(&s).layers.iter().filter(|l| l.artboard().is_some()).map(|l| l.id).collect();
+    assert_eq!(restored, original);
+    s.execute("multipage.page.delete", json!({"layer": b})).unwrap();
+    assert_eq!(doc(&s).artboards().len(), 1);
+    s.undo();
+    assert_eq!(doc(&s).artboards().len(), 2);
+    assert!(s.execute("multipage.page.delete", json!({"layer": 999999999_u64})).is_err());
+}
+
+/// The visible Pages panel and PDF must share the same top-to-bottom reading order.
+/// "before"/"after" are explicit and do not change the regular Artboard tool's
+/// legacy stacking when the option is omitted.
+#[test]
+fn multipage_insert_before_after_and_reorder_match_export_order() {
+    let mut s = session(8);
+    let first = s.execute("layer.new.artboard", json!({"rect": [0, 0, 30, 40], "page": true})).unwrap()["layer"].as_u64().unwrap();
+    let after = s.execute("layer.artboard.addBeside", json!({"layer": first, "side": "right", "pageOrder": "after"})).unwrap();
+    let after = after["layer"].as_u64().unwrap();
+    assert_eq!(chosen_artboards(doc(&s), &json!({})), vec![LayerId(first), LayerId(after)]);
+    let before = s.execute("layer.artboard.addBeside", json!({"layer": first, "side": "left", "pageOrder": "before"})).unwrap();
+    let before = before["layer"].as_u64().unwrap();
+    assert_eq!(chosen_artboards(doc(&s), &json!({})), vec![LayerId(before), LayerId(first), LayerId(after)]);
+
+    // Reorder edits the logical page order, without moving any artboard on the canvas.
+    let original_rect = board_rect(&s, after);
+    s.execute("multipage.page.reorder", json!({"layer": after, "step": "previous"})).unwrap();
+    assert_eq!(chosen_artboards(doc(&s), &json!({})), vec![LayerId(before), LayerId(after), LayerId(first)]);
+    assert_eq!(board_rect(&s, after), original_rect);
+    s.undo();
+    assert_eq!(chosen_artboards(doc(&s), &json!({})), vec![LayerId(before), LayerId(first), LayerId(after)]);
+
+    // A right-side duplicate can also follow the active page in export order.
+    let duplicate = s.execute("layer.artboard.addBeside", json!({"layer": first, "side": "right", "duplicate": true, "pageOrder": "after"})).unwrap();
+    let duplicate = duplicate["layer"].as_u64().unwrap();
+    assert_eq!(chosen_artboards(doc(&s), &json!({})), vec![LayerId(before), LayerId(first), LayerId(duplicate), LayerId(after)]);
+    s.undo();
+    assert_eq!(chosen_artboards(doc(&s), &json!({})), vec![LayerId(before), LayerId(first), LayerId(after)]);
+
+    // A rejected order does not mutate the document or its undo history.
+    assert_rejected(&mut s, "layer.artboard.addBeside", json!({"layer": first, "pageOrder": "sideways"}));
+}
+
+#[test]
+fn multipage_legacy_artboard_insertion_keeps_original_stack_order() {
+    let mut s = session(8);
+    let first = s.execute("layer.new.artboard", json!({"rect": [0, 0, 30, 40]})).unwrap()["layer"].as_u64().unwrap();
+    let added = s.execute("layer.artboard.addBeside", json!({"layer": first, "side": "right"})).unwrap()["layer"].as_u64().unwrap();
+    assert_eq!(chosen_artboards(doc(&s), &json!({})), vec![LayerId(added), LayerId(first)]);
+}
+
+/// Native Pcraft saves must retain page identity, order, dimensions and names.
+/// Restoring layer order alone is not sufficient without a save/reopen check.
+#[test]
+fn multipage_pcraft_round_trip_keeps_page_order_and_properties() {
+    let mut s = session(8);
+    let cover = s.execute("layer.new.artboard", json!({"rect": [0, 0, 32, 48], "name": "Cover"})).unwrap();
+    let cover = cover["layer"].as_u64().unwrap();
+    let content = s.execute("layer.artboard.addBeside", json!({"layer": cover, "side": "right", "pageOrder": "after"})).unwrap();
+    let content = content["layer"].as_u64().unwrap();
+    s.execute("layer.artboard.set", json!({"layer": content, "name": "Contents", "width": 48, "height": 64})).unwrap();
+    let expected = chosen_artboards(doc(&s), &json!({}));
+    assert_eq!(expected, vec![LayerId(cover), LayerId(content)]);
+
+    let encoded = photocraft_io::export(doc(&s), "layout.pcraft", &photocraft_io::ExportOptions::default()).unwrap();
+    let restored = photocraft_io::import("layout.pcraft", &encoded.bytes).unwrap().document;
+    assert_eq!(chosen_artboards(&restored, &json!({})), expected);
+    assert_eq!(restored.layer(LayerId(cover)).unwrap().name, "Cover");
+    assert_eq!(restored.layer(LayerId(content)).unwrap().name, "Contents");
+    assert_eq!(restored.layer(LayerId(cover)).unwrap().artboard().unwrap().rect.width(), 32);
+    assert_eq!(restored.layer(LayerId(content)).unwrap().artboard().unwrap().rect.width(), 48);
+    assert_eq!(restored.layer(LayerId(content)).unwrap().artboard().unwrap().rect.height(), 64);
+
+    // The flattened multipage PDF must use the same page order and physical
+    // dimensions as the native document, not the reverse layer stack.
+    let pdf_path = std::env::temp_dir().join(format!("kimagepro-multipage-{}.pdf", std::process::id()));
+    let pdf_name = pdf_path.to_string_lossy().into_owned();
+    let result = s.execute("file.export.artboardsToPdf", json!({"path": pdf_name})).unwrap();
+    assert_eq!(result["pages"], 2);
+    let bytes = std::fs::read(&pdf_path).unwrap();
+    let text = String::from_utf8_lossy(&bytes);
+    let media: Vec<String> = text.split("/MediaBox [0 0 ").skip(1).filter_map(|part| part.split_once(']').map(|(box_size, _)| box_size.to_string())).collect();
+    let points_per_pixel = 72.0 / f64::from(doc(&s).resolution_dpi.max(1.0));
+    assert_eq!(
+        media,
+        [format!("{:.3} {:.3}", 32.0 * points_per_pixel, 48.0 * points_per_pixel), format!("{:.3} {:.3}", 48.0 * points_per_pixel, 64.0 * points_per_pixel)]
+    );
+    let _ = std::fs::remove_file(pdf_path);
+}
+
+#[test]
+fn multipage_layout_is_undoable_validated_and_native_persistent() {
+    let mut s = session(8);
+    let first = s.execute("layer.new.artboard", json!({"rect": [0, 0, 100, 80], "name": "Cover", "page": true})).unwrap();
+    let cover = first["layer"].as_u64().unwrap();
+    assert_eq!(doc(&s).layer(LayerId(cover)).unwrap().artboard().unwrap().page, Some(PageLayout::default()));
+
+    let changed = s.execute("multipage.page.setLayout", json!({"layer": cover, "margins": [4, 5, 6, 7], "bleed": 3})).unwrap();
+    assert_eq!(changed["margins"], json!([4, 5, 6, 7]));
+    assert_eq!(changed["bleed"], json!([3, 3, 3, 3]));
+    let layout = doc(&s).layer(LayerId(cover)).unwrap().artboard().unwrap().page.clone().unwrap();
+    assert_eq!(layout.margins, [4, 5, 6, 7]);
+    assert_eq!(layout.bleed, [3; 4]);
+
+    s.undo();
+    assert_eq!(doc(&s).layer(LayerId(cover)).unwrap().artboard().unwrap().page, Some(PageLayout::default()));
+    s.execute("multipage.page.setLayout", json!({"layer": cover, "margins": [4, 5, 6, 7], "bleed": 3})).unwrap();
+
+    let before = doc(&s).clone();
+    for invalid in [
+        json!({"layer": cover, "margins": [0, 50, 0, 50]}),
+        json!({"layer": cover, "bleed": -1}),
+        json!({"layer": cover, "margins": [1, 2, 3]}),
+        json!({"layer": cover, "margins": [1.5, 0, 0, 0]}),
+        json!({"layer": cover, "bleed": [1, 2, 3, "bad"]}),
+        json!({"layer": 999999_u64, "margins": 1}),
+    ] {
+        assert!(s.execute("multipage.page.setLayout", invalid.clone()).is_err(), "accepted {invalid}");
+        assert_eq!(doc(&s), &before, "rejected page layout changed the document");
+    }
+    assert!(s.execute("layer.artboard.set", json!({"layer": cover, "width": 10})).is_err());
+    assert_eq!(doc(&s), &before, "invalid page resize changed the document");
+
+    let added = s.execute("layer.artboard.addBeside", json!({"layer": cover, "side": "right", "pageOrder": "after", "duplicate": true})).unwrap();
+    let duplicate = added["layer"].as_u64().unwrap();
+    assert_ne!(duplicate, cover);
+    assert_eq!(doc(&s).layer(LayerId(duplicate)).unwrap().artboard().unwrap().page, Some(layout.clone()));
+    s.execute("multipage.page.setLayout", json!({"layer": duplicate, "bleed": 1})).unwrap();
+    assert_eq!(doc(&s).layer(LayerId(cover)).unwrap().artboard().unwrap().page, Some(layout.clone()));
+
+    let encoded = photocraft_io::export(doc(&s), "layout.pcraft", &photocraft_io::ExportOptions::default()).unwrap();
+    let restored = photocraft_io::import("layout.pcraft", &encoded.bytes).unwrap().document;
+    assert_eq!(restored.layer(LayerId(cover)).unwrap().artboard().unwrap().page, Some(layout));
+    assert_eq!(restored.layer(LayerId(duplicate)).unwrap().artboard().unwrap().page.as_ref().unwrap().bleed, [1; 4]);
+}
+
+#[test]
+fn multipage_explicit_loose_layer_ownership_survives_reorder_save_and_undo() {
+    let mut s = session(8);
+    let cover = s.execute("layer.new.artboard", json!({"rect": [0, 0, 100, 80], "page": true})).unwrap()["layer"].as_u64().unwrap();
+    let second = s.execute("layer.artboard.addBeside", json!({"layer": cover, "side": "right", "pageOrder": "after"})).unwrap()["layer"].as_u64().unwrap();
+    let id = s
+        .edit("Loose object", |doc, _| {
+            let mut layer = Layer::raster("Loose object", doc.pixel_format());
+            layer.surface_mut().unwrap().fill_rect(Rect::new(-20, 5, -4, 20), &[1.0, 0.0, 0.0, 1.0]);
+            let id = layer.id;
+            doc.layers.push(layer);
+            Ok(id)
+        })
+        .unwrap();
+    let owner = |s: &mut Session| s.execute("multipage.page.ownerOf", json!({"layer": id.0})).unwrap()["page"].clone();
+    assert_eq!(owner(&mut s), Value::Null);
+    s.execute("multipage.page.setOwner", json!({"layer": id.0, "page": cover})).unwrap();
+    assert_eq!(owner(&mut s), json!(cover));
+    assert_eq!(doc(&s).layer(id).unwrap().surface().unwrap().content_bounds(), Rect::new(-20, 5, -4, 20));
+
+    s.execute("multipage.page.reorder", json!({"layer": cover, "step": "next"})).unwrap();
+    assert_eq!(owner(&mut s), json!(cover), "page ownership follows identity, not visual order");
+
+    let copied = s.execute("layer.artboard.addBeside", json!({"layer": cover, "side": "right", "duplicate": true, "pageOrder": "after"})).unwrap()["layer"]
+        .as_u64()
+        .unwrap();
+    assert!(doc(&s).layer(LayerId(copied)).unwrap().artboard().unwrap().page.as_ref().unwrap().owned_layers.is_empty());
+    assert_eq!(owner(&mut s), json!(cover));
+
+    s.execute("multipage.page.setOwner", json!({"layer": id.0, "page": second})).unwrap();
+    assert_eq!(owner(&mut s), json!(second));
+    assert!(doc(&s).layer(LayerId(cover)).unwrap().artboard().unwrap().page.as_ref().unwrap().owned_layers.is_empty());
+    assert_eq!(doc(&s).layer(LayerId(second)).unwrap().artboard().unwrap().page.as_ref().unwrap().owned_layers, vec![id]);
+
+    let data = photocraft_io::export(doc(&s), "page-owners.pcraft", &photocraft_io::ExportOptions::default()).unwrap();
+    let restored = photocraft_io::import("page-owners.pcraft", &data.bytes).unwrap().document;
+    assert_eq!(restored.layer(LayerId(second)).unwrap().artboard().unwrap().page.as_ref().unwrap().owned_layers, vec![id]);
+    assert_eq!(restored.layer(id).unwrap().surface().unwrap().content_bounds(), Rect::new(-20, 5, -4, 20));
+
+    s.undo();
+    assert_eq!(owner(&mut s), json!(cover), "ownership change is one undo step");
+    assert!(s.execute("multipage.page.setOwner", json!({"layer": id.0, "page": 999999999u64})).is_err());
+    assert_eq!(owner(&mut s), json!(cover));
+    s.execute("multipage.page.delete", json!({"layer": cover})).unwrap();
+    assert_eq!(owner(&mut s), Value::Null, "deleting a page detaches, never deletes loose artwork");
+    assert!(doc(&s).layer(id).is_some());
+    s.undo();
+    assert_eq!(owner(&mut s), json!(cover));
+    s.execute("multipage.page.setOwner", json!({"layer": id.0, "page": null})).unwrap();
+    assert_eq!(owner(&mut s), Value::Null);
+}
+
+#[test]
+fn multipage_legacy_artboards_are_not_implicitly_converted() {
+    let mut s = session(8);
+    let first = s.execute("layer.new.artboard", json!({"rect": [0, 0, 100, 80]})).unwrap()["layer"].as_u64().unwrap();
+    assert_eq!(doc(&s).layer(LayerId(first)).unwrap().artboard().unwrap().page, None);
+    let second = s.execute("layer.artboard.addBeside", json!({"layer": first, "side": "right", "pageOrder": "after"})).unwrap()["layer"].as_u64().unwrap();
+    assert_eq!(doc(&s).layer(LayerId(first)).unwrap().artboard().unwrap().page, None);
+    assert_eq!(doc(&s).layer(LayerId(second)).unwrap().artboard().unwrap().page, Some(PageLayout::default()));
+    s.execute("multipage.page.setLayout", json!({"layer": first, "margins": 5})).unwrap();
+    assert_eq!(doc(&s).layer(LayerId(first)).unwrap().artboard().unwrap().page.as_ref().unwrap().margins, [5; 4]);
+}
+
+#[test]
+fn multipage_bulk_page_ownership_is_atomic_undoable_and_keeps_loose_coordinates() {
+    let mut s = session(8);
+    let a = add_square(&mut s, Rect::new(-20, 4, -10, 14), [1.0, 0.0, 0.0, 1.0]);
+    let b = add_square(&mut s, Rect::new(115, 6, 130, 22), [0.0, 0.0, 1.0, 1.0]);
+    let first = s.execute("layer.new.artboard", json!({"page": true, "rect": [0, 0, 100, 80]})).unwrap()["layer"].as_u64().unwrap();
+    let second = s.execute("layer.artboard.addBeside", json!({"layer": first, "side": "right", "pageOrder": "after"})).unwrap()["layer"].as_u64().unwrap();
+    let owner = |s: &mut Session, id: LayerId| s.execute("multipage.page.ownerOf", json!({"layer": id.0})).unwrap()["page"].clone();
+    let original_a = doc(&s).layer(a).unwrap().surface().unwrap().content_bounds();
+    let original_b = doc(&s).layer(b).unwrap().surface().unwrap().content_bounds();
+
+    s.execute("multipage.page.setOwner", json!({"layers": [a.0, b.0], "page": first})).unwrap();
+    assert_eq!(owner(&mut s, a), json!(first));
+    assert_eq!(owner(&mut s, b), json!(first));
+    s.undo();
+    assert_eq!(owner(&mut s, a), Value::Null);
+    assert_eq!(owner(&mut s, b), Value::Null, "both assignments must undo together");
+    s.redo();
+    assert_eq!(owner(&mut s, a), json!(first));
+    assert_eq!(owner(&mut s, b), json!(first));
+
+    s.execute("multipage.page.setOwner", json!({"layers": [a.0, b.0], "page": second})).unwrap();
+    assert_eq!(owner(&mut s, a), json!(second));
+    assert_eq!(owner(&mut s, b), json!(second));
+    assert!(doc(&s).layer(LayerId(first)).unwrap().artboard().unwrap().page.as_ref().unwrap().owned_layers.is_empty());
+    assert_eq!(doc(&s).layer(a).unwrap().surface().unwrap().content_bounds(), original_a);
+    assert_eq!(doc(&s).layer(b).unwrap().surface().unwrap().content_bounds(), original_b);
+
+    for invalid in [
+        json!({"layers": [a.0, second], "page": first}),
+        json!({"layers": [a.0, 999999999u64], "page": first}),
+        json!({"layers": [a.0, a.0], "page": first}),
+        json!({"layers": [], "page": first}),
+        json!({"layers": [a.0, b.0], "page": 999999999u64}),
+    ] {
+        assert!(s.execute("multipage.page.setOwner", invalid).is_err());
+        assert_eq!(owner(&mut s, a), json!(second), "invalid bulk request must not partially move A");
+        assert_eq!(owner(&mut s, b), json!(second), "invalid bulk request must not partially move B");
+    }
+
+    s.execute("multipage.page.setOwner", json!({"layers": [a.0, b.0], "page": null})).unwrap();
+    assert_eq!(owner(&mut s, a), Value::Null);
+    assert_eq!(owner(&mut s, b), Value::Null);
+    s.undo();
+    assert_eq!(owner(&mut s, a), json!(second));
+    assert_eq!(owner(&mut s, b), json!(second));
+}
+
+#[test]
+fn multipage_page_placement_preserves_loose_artwork_order_and_native_roundtrip() {
+    let mut s = session(8);
+    let loose = add_square(&mut s, Rect::new(-40, -20, -20, 0), [1.0, 0.0, 0.0, 1.0]);
+    let unassigned = add_square(&mut s, Rect::new(130, 10, 145, 25), [0.0, 0.0, 1.0, 1.0]);
+    let first = s.execute("layer.new.artboard", json!({"rect": [0, 0, 100, 80], "page": true, "name": "Cover"})).unwrap()["layer"].as_u64().unwrap();
+    let second = s.execute("layer.artboard.addBeside", json!({"layer": first, "side": "right", "pageOrder": "after"})).unwrap()["layer"].as_u64().unwrap();
+    s.execute("multipage.page.setOwner", json!({"layer": loose.0, "page": first})).unwrap();
+    let pages_before = s.execute("multipage.page.list", json!({})).unwrap();
+    let first_rect = doc(&s).layer(LayerId(first)).unwrap().artboard().unwrap().rect;
+    let other_rect = doc(&s).layer(LayerId(second)).unwrap().artboard().unwrap().rect;
+    let layer_bounds = [loose, unassigned].map(|id| doc(&s).layer(id).unwrap().surface().unwrap().content_bounds());
+
+    // Move to a negative workspace coordinate while keeping the page size.
+    let placed = s.execute("multipage.page.place", json!({"layer": first, "x": -250, "y": -125})).unwrap();
+    assert_eq!(placed["rect"], json!([-250, -125, 100, 80]));
+    assert_eq!(placed["moved"], true);
+    let pages_after = s.execute("multipage.page.list", json!({})).unwrap();
+    assert_eq!(pages_after["pages"][0]["id"], pages_before["pages"][0]["id"]);
+    assert_eq!(pages_after["pages"][1]["id"], pages_before["pages"][1]["id"]);
+    assert_eq!(pages_after["pages"][0]["ownedLayers"], json!([loose.0]));
+    assert_eq!(doc(&s).layer(LayerId(second)).unwrap().artboard().unwrap().rect, other_rect);
+    for (id, expected) in [loose, unassigned].into_iter().zip(layer_bounds) {
+        assert_eq!(doc(&s).layer(id).unwrap().surface().unwrap().content_bounds(), expected);
+    }
+    assert_eq!(s.execute("multipage.page.ownerOf", json!({"layer": loose.0})).unwrap()["page"], json!(first));
+    assert_eq!(s.execute("multipage.page.place", json!({"layer": first, "x": -250, "y": -125})).unwrap()["moved"], false);
+
+    let encoded = photocraft_io::export(doc(&s), "page-placement.pcraft", &photocraft_io::ExportOptions::default()).unwrap();
+    let restored = photocraft_io::import("page-placement.pcraft", &encoded.bytes).unwrap().document;
+    assert_eq!(restored.layer(LayerId(first)).unwrap().artboard().unwrap().rect, Rect::new(-250, -125, -150, -45));
+    assert_eq!(restored.layer(LayerId(second)).unwrap().artboard().unwrap().rect, other_rect);
+    assert_eq!(restored.layer(LayerId(first)).unwrap().artboard().unwrap().page.as_ref().unwrap().owned_layers, vec![loose]);
+    for (id, expected) in [loose, unassigned].into_iter().zip(layer_bounds) {
+        assert_eq!(restored.layer(id).unwrap().surface().unwrap().content_bounds(), expected);
+    }
+
+    s.undo();
+    assert_eq!(doc(&s).layer(LayerId(first)).unwrap().artboard().unwrap().rect, first_rect);
+    assert_eq!(doc(&s).layer(LayerId(second)).unwrap().artboard().unwrap().rect, other_rect);
+    for invalid in [json!({"layer": first, "x": 0.5, "y": 0}), json!({"layer": first, "x": i32::MAX, "y": 0}), json!({"layer": 999999u64, "x": 0, "y": 0})] {
+        let before = doc(&s).clone();
+        assert!(s.execute("multipage.page.place", invalid).is_err());
+        assert_eq!(doc(&s), &before);
+    }
+}
+
+#[test]
+fn multipage_page_inventory_preserves_reading_order_workspace_positions_and_loose_ownership() {
+    let mut s = session(8);
+    let assigned = add_square(&mut s, Rect::new(-10, 4, 0, 14), [1.0, 0.0, 0.0, 1.0]);
+    let unassigned = add_square(&mut s, Rect::new(140, 4, 150, 14), [0.0, 0.0, 1.0, 1.0]);
+    let first = s.execute("layer.new.artboard", json!({"rect": [0, 0, 100, 80], "page": true, "name": "Cover"})).unwrap()["layer"].as_u64().unwrap();
+    let second = s.execute("layer.artboard.addBeside", json!({"layer": first, "side": "right", "pageOrder": "after"})).unwrap()["layer"].as_u64().unwrap();
+    s.execute("multipage.page.setLayout", json!({"layer": first, "margins": 4, "bleed": 2})).unwrap();
+    s.execute("multipage.page.setOwner", json!({"layer": assigned.0, "page": first})).unwrap();
+
+    let inventory = s.execute("multipage.page.list", json!({})).unwrap();
+    assert_eq!(inventory["pages"][0]["id"], first);
+    assert_eq!(inventory["pages"][0]["name"], "Cover");
+    assert_eq!(inventory["pages"][0]["rect"], json!([0, 0, 100, 80]));
+    assert_eq!(inventory["pages"][0]["margins"], json!([4, 4, 4, 4]));
+    assert_eq!(inventory["pages"][0]["bleed"], json!([2, 2, 2, 2]));
+    assert_eq!(inventory["pages"][0]["ownedLayers"], json!([assigned.0]));
+    assert_eq!(inventory["pages"][1]["id"], second);
+    assert_eq!(inventory["workspaceBounds"][0], -10);
+    assert_eq!(inventory["workspaceBounds"][1], 0);
+    assert!(inventory["workspaceBounds"][2].as_i64().unwrap() >= 200);
+    assert_eq!(inventory["workspaceBounds"][3], 80);
+    assert!(inventory["unassignedLayers"].as_array().unwrap().contains(&json!(unassigned.0)));
+    assert!(!inventory["unassignedLayers"].as_array().unwrap().contains(&json!(assigned.0)));
+
+    s.execute("multipage.page.reorder", json!({"layer": first, "step": "next"})).unwrap();
+    let reordered = s.execute("multipage.page.list", json!({})).unwrap();
+    assert_eq!(reordered["pages"][0]["id"], second);
+    assert_eq!(reordered["pages"][1]["id"], first);
+    assert_eq!(reordered["pages"][1]["rect"], json!([0, 0, 100, 80]));
+    assert_eq!(reordered["pages"][1]["ownedLayers"], json!([assigned.0]));
+
+    let serialized = photocraft_io::export(doc(&s), "page-inventory.pcraft", &photocraft_io::ExportOptions::default()).unwrap();
+    let restored = photocraft_io::import("page-inventory.pcraft", &serialized.bytes).unwrap().document;
+    assert_eq!(chosen_artboards(&restored, &json!({})).first().map(|id| id.0), Some(second));
+    assert_eq!(restored.layer(LayerId(first)).unwrap().artboard().unwrap().page.as_ref().unwrap().owned_layers, vec![assigned]);
+}
+
+#[test]
+fn multipage_delete_and_reorder_ignore_legacy_artboards() {
+    let mut s = session(8);
+    let legacy = s.execute("layer.new.artboard", json!({"rect": [0, 0, 100, 80], "name": "Legacy"})).unwrap()["layer"].as_u64().unwrap();
+    let first = s.execute("layer.new.artboard", json!({"rect": [200, 0, 100, 80], "page": true, "name": "First"})).unwrap()["layer"].as_u64().unwrap();
+    let second = s.execute("layer.artboard.addBeside", json!({"layer": first, "side": "right", "pageOrder": "after"})).unwrap()["layer"].as_u64().unwrap();
+
+    assert!(s.execute("multipage.page.delete", json!({"layer": legacy})).is_err());
+    assert!(s.execute("multipage.page.reorder", json!({"layer": legacy, "step": "next"})).is_err());
+    assert!(doc(&s).layer(LayerId(legacy)).is_some());
+    assert_eq!(doc(&s).layer(LayerId(legacy)).unwrap().artboard().unwrap().page, None);
+
+    s.execute("multipage.page.reorder", json!({"layer": first, "step": "next"})).unwrap();
+    let pages = s.execute("multipage.page.list", json!({})).unwrap();
+    assert_eq!(pages["pages"][0]["id"], second);
+    assert_eq!(pages["pages"][1]["id"], first);
+    assert!(doc(&s).layer(LayerId(legacy)).is_some());
+
+    s.execute("multipage.page.delete", json!({"layer": first})).unwrap();
+    assert!(doc(&s).layer(LayerId(first)).is_none());
+    assert!(doc(&s).layer(LayerId(legacy)).is_some(), "deleting a page must not remove legacy artboards");
+    s.undo();
+    assert!(doc(&s).layer(LayerId(first)).is_some());
+}
+
+#[test]
+fn multipage_workspace_bounds_include_negative_pasteboard_artwork_and_ignore_hidden_layers() {
+    let mut s = session(8);
+    let visible = add_square(&mut s, Rect::new(-45, -30, -25, -10), [1.0, 0.0, 0.0, 1.0]);
+    let hidden = add_square(&mut s, Rect::new(-200, -200, -180, -180), [0.0, 1.0, 0.0, 1.0]);
+    s.execute("layer.setProps", json!({"layer": hidden.0, "visible": false})).unwrap();
+    let page = s.execute("layer.new.artboard", json!({"rect": [100, 50, 60, 40], "page": true})).unwrap()["layer"].as_u64().unwrap();
+
+    let before = s.execute("multipage.page.list", json!({})).unwrap();
+    assert_eq!(before["workspaceBounds"], json!([-45, -30, 160, 90]));
+    s.execute("multipage.page.setOwner", json!({"layer": visible.0, "page": page})).unwrap();
+    let owned = s.execute("multipage.page.list", json!({})).unwrap();
+    assert_eq!(owned["workspaceBounds"], before["workspaceBounds"], "page ownership must not change pasteboard geometry");
+
+    s.execute("layer.translate", json!({"layer": visible.0, "dx": 50, "dy": 40})).unwrap();
+    let moved = s.execute("multipage.page.list", json!({})).unwrap();
+    assert_eq!(moved["workspaceBounds"], json!([5, 10, 160, 90]));
+    s.undo();
+    assert_eq!(s.execute("multipage.page.list", json!({})).unwrap()["workspaceBounds"], before["workspaceBounds"]);
+}

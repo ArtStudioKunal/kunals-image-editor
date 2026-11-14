@@ -152,7 +152,7 @@ impl Builder {
                     LayerContent::Group(Group { children: std::mem::take(&mut children), expanded: true, artboard: None, frame_stroke: None }),
                 );
                 if let LayerContent::Group(gr) = &mut g.content {
-                    gr.artboard = Some(Artboard { rect: r, background: ArtboardBackground::White, preset: String::new() });
+                    gr.artboard = Some(Artboard { rect: r, background: ArtboardBackground::White, preset: String::new(), page: None });
                 }
                 if rects.len() > 1 {
                     self.warn("facing pages import as one artboard per spread");
@@ -289,7 +289,7 @@ impl Builder {
                 let mut g = self.group(n, children);
                 if top {
                     if let LayerContent::Group(gr) = &mut g.content {
-                        gr.artboard = Some(Artboard { rect: r, background: bg, preset: String::new() });
+                        gr.artboard = Some(Artboard { rect: r, background: bg, preset: String::new(), page: None });
                     }
                 } else {
                     // PhotoCraft artboards are top-level groups: a nested one clips by a vector mask.

@@ -104,10 +104,25 @@ pub fn draw_frames(app: &PhotocraftApp, painter: &egui::Painter, xf: &ViewXform)
 
 /// View › Fit Artboard on Screen: zoom to the active artboard (or the first one).
 pub fn fit_artboard(app: &mut PhotocraftApp) -> Result<Value, String> {
-    let i = app.session.active_index().ok_or("no document")?;
     let st = app.session.active().ok_or("no document")?;
     let id = st.active_layer.and_then(|l| st.doc.artboard_of(l)).or_else(|| st.doc.artboards().last().map(|b| b.0)).ok_or("the document has no artboards")?;
-    let b = st.doc.layer(id).and_then(Layer::artboard).map(|a| a.rect).ok_or("no artboard")?;
+    fit_board(app, id)
+}
+
+/// Navigate to a native Multipage page without changing the active layer or page order.
+pub fn fit_page(app: &mut PhotocraftApp, id: photocraft_doc::LayerId) -> Result<Value, String> {
+    let st = app.session.active().ok_or("no document")?;
+    if app.ui.workspace != "Multipage" || !st.doc.layer(id).and_then(Layer::artboard).is_some_and(|board| board.page.is_some()) {
+        return Err("not a Multipage page".into());
+    }
+    fit_board(app, id)
+}
+
+/// Shared camera operation. View > Fit Artboard continues supporting legacy artboards.
+fn fit_board(app: &mut PhotocraftApp, id: photocraft_doc::LayerId) -> Result<Value, String> {
+    let i = app.session.active_index().ok_or("no document")?;
+    let st = app.session.active().ok_or("no document")?;
+    let b = st.doc.layer(id).and_then(Layer::artboard).map(|board| board.rect).ok_or("no artboard")?;
     let size = [st.doc.size.width, st.doc.size.height];
     let area = app.last_canvas_rect.size();
     let area = if area.x > 50.0 { area } else { egui::vec2(1200.0, 800.0) };
@@ -124,6 +139,46 @@ pub fn fit_artboard(app: &mut PhotocraftApp) -> Result<Value, String> {
     v.request_zoom_animation(app.session.prefs().general.animated_zoom);
     v.zoom_anchor = None;
     Ok(json!({"zoom": v.zoom, "artboard": id.0, "bounds": [b.x0, b.y0, b.x1, b.y1]}))
+}
+
+/// Centre and fit all native Multipage pages and visible root pasteboard artwork,
+/// including negative document coordinates. This changes only the camera: page
+/// order, page geometry, object coordinates and export bounds are untouched.
+pub fn fit_pasteboard(app: &mut PhotocraftApp) -> Result<Value, String> {
+    if app.ui.workspace != "Multipage" {
+        return Err("Fit Pasteboard is available only in Multipage".into());
+    }
+    let idx = app.session.active_index().ok_or("no document")?;
+    let inventory = app.session.execute("multipage.page.list", json!({})).map_err(|e| e.to_string())?;
+    if inventory["pages"].as_array().is_none_or(Vec::is_empty) {
+        return Err("the document has no Multipage pages".into());
+    }
+    let bounds = inventory["workspaceBounds"].as_array().ok_or("missing workspace bounds")?;
+    let axis = |index: usize| -> Result<i32, String> {
+        let value = bounds.get(index).and_then(Value::as_i64).ok_or("invalid workspace bounds")?;
+        i32::try_from(value).map_err(|_| "workspace coordinate out of range".into())
+    };
+    let (x0, y0, x1, y1) = (axis(0)?, axis(1)?, axis(2)?, axis(3)?);
+    if x1 <= x0 || y1 <= y0 {
+        return Err("empty workspace bounds".into());
+    }
+    let size = {
+        let doc = &app.session.active().ok_or("no document")?.doc;
+        [doc.size.width, doc.size.height]
+    };
+    let area = app.last_canvas_rect.size();
+    let area = if area.x > 50.0 && area.y > 50.0 { area } else { egui::vec2(1200.0, 800.0) };
+    let ppp = app.canvas_ppp();
+    let width = (f64::from(x1) - f64::from(x0)) as f32;
+    let height = (f64::from(y1) - f64::from(y0)) as f32;
+    let v = &mut app.ui.views[idx];
+    v.zoom = ((area.x - 60.0).max(1.0) / width).min((area.y - 80.0).max(1.0) / height).min(1.0) * ppp;
+    v.zoom = crate::zoom_levels::clamp(v.zoom, size);
+    v.center = [((f64::from(x0) + f64::from(x1)) / 2.0) as f32, ((f64::from(y0) + f64::from(y1)) / 2.0) as f32];
+    v.fit_pending = false;
+    v.request_zoom_animation(app.session.prefs().general.animated_zoom);
+    v.zoom_anchor = None;
+    Ok(json!({"bounds": [x0, y0, x1, y1], "zoom": v.zoom}))
 }
 
 /// Properties panel for an artboard.
@@ -395,6 +450,70 @@ mod tests {
             let c = app.ui.views[i].center;
             assert_eq!(c, [want[0] as f32, want[1] as f32], "{params}");
         }
+    }
+
+    #[test]
+    fn fit_page_navigates_to_explicit_page_without_changing_selection() {
+        let (mut app, _) = app();
+        app.ui.workspace = "Multipage".into();
+        let first = app.run("layer.new.artboard", json!({"rect": [0, 0, 50, 40], "page": true})).unwrap()["layer"].as_u64().unwrap();
+        let second = app.run("layer.new.artboard", json!({"rect": [-400, -200, 80, 60], "page": true})).unwrap()["layer"].as_u64().unwrap();
+        let before = app.session.active().unwrap().doc.artboards().iter().map(|(id, _, board)| (*id, board.rect)).collect::<Vec<_>>();
+        let active = app.session.active().unwrap().active_layer;
+        // The artboard insertion command may reposition pages to avoid overlap.
+        // Navigation must fit their *stored* geometry, not the requested rects.
+        let rects = [first, second].map(|id| app.session.active().unwrap().doc.layer(photocraft_doc::LayerId(id)).unwrap().artboard().unwrap().rect);
+        assert_ne!(rects[0], rects[1]);
+        let index = app.session.active_index().unwrap();
+        for (id, rect) in [(first, rects[0]), (second, rects[1])] {
+            let result = fit_page(&mut app, photocraft_doc::LayerId(id)).unwrap();
+            assert_eq!(result["artboard"], json!(id));
+            assert_eq!(result["bounds"], json!([rect.x0, rect.y0, rect.x1, rect.y1]));
+            assert_eq!(
+                app.ui.views[index].center,
+                [((f64::from(rect.x0) + f64::from(rect.x1)) / 2.0) as f32, ((f64::from(rect.y0) + f64::from(rect.y1)) / 2.0) as f32]
+            );
+            assert_eq!(app.session.active().unwrap().active_layer, active);
+        }
+        assert_eq!(app.session.active().unwrap().doc.artboards().iter().map(|(id, _, board)| (*id, board.rect)).collect::<Vec<_>>(), before);
+        assert!(fit_page(&mut app, photocraft_doc::LayerId(999_999)).is_err());
+    }
+
+    #[test]
+    fn fit_pasteboard_includes_negative_artwork_without_moving_pages() {
+        let (mut app, _) = app();
+        assert!(fit_pasteboard(&mut app).is_err(), "fit requires Multipage mode");
+        app.ui.workspace = "Multipage".into();
+        assert!(fit_pasteboard(&mut app).is_err(), "fit requires a native page");
+        app.run("layer.new.artboard", json!({"rect": [100, 50, 60, 40], "page": true})).unwrap();
+        app.session
+            .edit("Stage Pasteboard Artwork", |doc, _| {
+                let mut layer = photocraft_doc::Layer::raster("Off-page", doc.pixel_format());
+                layer.surface_mut().unwrap().fill_rect(photocraft_geom::Rect::new(-40, -20, -20, 0), &[1.0, 0.0, 0.0, 1.0]);
+                doc.layers.push(layer);
+                Ok(())
+            })
+            .unwrap();
+        let original = app.session.active().unwrap().doc.artboards()[0].2.rect;
+        // Fitting the pasteboard is a camera-only operation. Off-page artwork, page
+        // ownership, the active layer, revision and undo history must all survive.
+        let before = app.session.active().unwrap().doc.clone();
+        let active = app.session.active().unwrap().active_layer;
+        let revision = app.session.active().unwrap().revision;
+        let history = app.session.active().unwrap().history.past_len();
+        let result = fit_pasteboard(&mut app).unwrap();
+        assert_eq!(result["bounds"], json!([-40, -20, 160, 90]));
+        let idx = app.session.active_index().unwrap();
+        assert_eq!(app.ui.views[idx].center, [60.0, 35.0]);
+        assert_eq!(app.session.active().unwrap().doc.artboards()[0].2.rect, original);
+        assert_eq!(app.session.active().unwrap().doc, before);
+        assert_eq!(app.session.active().unwrap().active_layer, active);
+        assert_eq!(app.session.active().unwrap().revision, revision);
+        assert_eq!(app.session.active().unwrap().history.past_len(), history);
+        // Repeated fitting must not change document state or drift the camera.
+        assert_eq!(fit_pasteboard(&mut app).unwrap()["bounds"], result["bounds"]);
+        assert_eq!(app.ui.views[idx].center, [60.0, 35.0]);
+        assert_eq!(app.session.active().unwrap().doc, before);
     }
 
     fn drag(app: &mut PhotocraftApp, from: [f64; 2], by: [f64; 2], mods: egui::Modifiers) {

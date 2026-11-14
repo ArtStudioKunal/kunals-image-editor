@@ -40,8 +40,60 @@ pub fn page_key(key: Key, mods: Modifiers, size: Vec2) -> Option<PageKey> {
     Some(PageKey::Scroll(if sideways { vec2(sign * step, 0.0) } else { vec2(0.0, sign * step) }))
 }
 
+/// A new Multipage page's physical direction and logical reading order.
+/// Repeated, modified or non-page keys never create pages.
+fn multipage_insert(key: Key, mods: Modifiers, repeat: bool) -> Option<(&'static str, &'static str)> {
+    if repeat || mods.alt || mods.ctrl || mods.command || mods.shift {
+        return None;
+    }
+    match key {
+        Key::PageUp => Some(("left", "before")),
+        Key::PageDown => Some(("right", "after")),
+        _ => None,
+    }
+}
+
 /// Consumes this frame's page keys and moves the active document's view. True when one ran.
 pub fn handle(app: &mut PhotocraftApp, ctx: &egui::Context) -> bool {
+    // A focused input or active on-canvas text session owns its keys, including
+    // Page Up/Down. Creating pages while typing could silently change a document.
+    if app.ui.workspace == "Multipage" && (ctx.text_edit_focused() || app.ui.text_edit.is_some()) {
+        return false;
+    }
+    // Multipage: Page Up inserts BEFORE, Page Down AFTER in page/PDF reading order,
+    // independent of their physical position on the workspace.
+    if app.ui.workspace == "Multipage" && app.session.active().is_some() {
+        let direction = ctx.input_mut(|input| {
+            let mut direction = None;
+            input.events.retain(|event| {
+                if let Event::Key { key, pressed: true, modifiers, repeat, .. } = event
+                    && let Some(insert) = multipage_insert(*key, *modifiers, *repeat)
+                {
+                    direction = Some(insert);
+                    return false;
+                }
+                true
+            });
+            direction
+        });
+        if let Some((side, order)) = direction {
+            let board_id = app.session.active().and_then(|state| {
+                let active = state.active_layer?;
+                state.doc.artboard_of(active)
+            });
+            let command = if board_id.is_some() { "layer.artboard.addBeside" } else { "layer.new.artboard" };
+            let params = if board_id.is_some() {
+                serde_json::json!({"side": side, "pageOrder": order, "duplicate": false})
+            } else {
+                serde_json::json!({"background": "white", "page": true})
+            };
+            if let Err(err) = app.run(command, params) {
+                app.ui.status = err.to_string();
+            }
+            ctx.request_repaint();
+            return true;
+        }
+    }
     let Some(i) = app.session.active_index() else { return false };
     let rect = crate::rulers::content_rect(app, app.last_canvas_rect);
     let size = rect.size();
@@ -128,6 +180,30 @@ mod tests {
         assert_eq!(page_key(Key::ArrowDown, none, size), None);
     }
 
+    /// Creating the first Multipage page must persist page metadata, not just a legacy
+    /// artboard: the Pages panel, page ownership, and print settings depend on it.
+    #[test]
+    fn page_down_creates_a_real_multipage_page_without_an_active_artboard() {
+        let ctx = egui::Context::default();
+        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), Default::default());
+        app.run("file.new", json!({"width": 200, "height": 160, "background": "transparent"})).unwrap();
+        app.ui.workspace = "Multipage".into();
+
+        let modifiers = Modifiers::NONE;
+        let raw = egui::RawInput {
+            events: vec![Event::Key { key: Key::PageDown, physical_key: None, pressed: true, repeat: false, modifiers }],
+            ..Default::default()
+        };
+        ctx.begin_pass(raw);
+        assert!(handle(&mut app, &ctx));
+        ctx.end_pass().textures_delta.clear();
+
+        let st = app.session.active().unwrap();
+        let pages: Vec<_> = st.doc.artboards().into_iter().filter(|(_, _, board)| board.page.is_some()).collect();
+        assert_eq!(pages.len(), 1, "the shortcut must create a Multipage page, not a legacy artboard");
+        assert_eq!(pages[0].0, st.active_layer.unwrap());
+    }
+
     /// #8057: through the app's key handling, Page Down scrolls a zoomed-in document a screen
     /// down at the same zoom, ⇧ a small step, ⌘ sideways; Home and End jump to the corners.
     #[test]
@@ -184,4 +260,15 @@ mod tests {
             }
         }
     }
+}
+
+#[cfg(test)]
+#[test]
+fn multipage_insertion_shortcuts_preserve_order_and_ignore_key_repeats() {
+    assert_eq!(multipage_insert(Key::PageUp, Modifiers::NONE, false), Some(("left", "before")));
+    assert_eq!(multipage_insert(Key::PageDown, Modifiers::NONE, false), Some(("right", "after")));
+    assert_eq!(multipage_insert(Key::PageDown, Modifiers::NONE, true), None);
+    assert_eq!(multipage_insert(Key::PageDown, Modifiers::SHIFT, false), None);
+    assert_eq!(multipage_insert(Key::PageUp, Modifiers::COMMAND, false), None);
+    assert_eq!(multipage_insert(Key::Home, Modifiers::NONE, false), None);
 }
