@@ -495,11 +495,25 @@ mod tests {
             })
             .unwrap();
         let original = app.session.active().unwrap().doc.artboards()[0].2.rect;
+        // Fitting the pasteboard is a camera-only operation. Off-page artwork, page
+        // ownership, the active layer, revision and undo history must all survive.
+        let before = app.session.active().unwrap().doc.clone();
+        let active = app.session.active().unwrap().active_layer;
+        let revision = app.session.active().unwrap().revision;
+        let history = app.session.active().unwrap().history.past_len();
         let result = fit_pasteboard(&mut app).unwrap();
         assert_eq!(result["bounds"], json!([-40, -20, 160, 90]));
         let idx = app.session.active_index().unwrap();
         assert_eq!(app.ui.views[idx].center, [60.0, 35.0]);
         assert_eq!(app.session.active().unwrap().doc.artboards()[0].2.rect, original);
+        assert_eq!(app.session.active().unwrap().doc, before);
+        assert_eq!(app.session.active().unwrap().active_layer, active);
+        assert_eq!(app.session.active().unwrap().revision, revision);
+        assert_eq!(app.session.active().unwrap().history.past_len(), history);
+        // Repeated fitting must not change document state or drift the camera.
+        assert_eq!(fit_pasteboard(&mut app).unwrap()["bounds"], result["bounds"]);
+        assert_eq!(app.ui.views[idx].center, [60.0, 35.0]);
+        assert_eq!(app.session.active().unwrap().doc, before);
     }
 
     fn drag(app: &mut PhotocraftApp, from: [f64; 2], by: [f64; 2], mods: egui::Modifiers) {
