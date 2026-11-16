@@ -404,8 +404,12 @@ mod tests {
         let mut doc = Document::with_background("s", Size::new(200, 100), ColorMode::Rgb, SampleType::U8, Color::WHITE);
         let mut board = Layer::group("Artboard 1", vec![]);
         if let photocraft_doc::LayerContent::Group(g) = &mut board.content {
-            g.artboard =
-                Some(photocraft_doc::Artboard { rect: photocraft_geom::Rect::new(20, 10, 120, 90), background: Default::default(), preset: String::new() });
+            g.artboard = Some(photocraft_doc::Artboard {
+                rect: photocraft_geom::Rect::new(20, 10, 120, 90),
+                background: Default::default(),
+                preset: String::new(),
+                page: None,
+            });
         }
         let id = doc.insert_above(None, board);
         let opts = SnapOptions::default();

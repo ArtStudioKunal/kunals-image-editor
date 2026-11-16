@@ -1488,3 +1488,31 @@ fn translate_can_carry_the_selection_in_the_same_step() {
         assert_eq!(state(&s), before, "dx {dx}: and changes nothing");
     }
 }
+
+#[test]
+fn multipage_page_alignment_centers_multiple_objects_without_collapsing_layout() {
+    let mut s = Session::new();
+    s.execute("file.new", json!({"width": 200, "height": 160, "background": "transparent"})).unwrap();
+    let a = rect_layer(&mut s, Rect::new(5, 5, 15, 15));
+    let b = rect_layer(&mut s, Rect::new(25, 5, 35, 15));
+    let page = s.execute("layer.new.artboard", json!({"rect": [40, 30, 100, 80], "page": true})).unwrap()["layer"].as_u64().unwrap();
+    s.execute("multipage.page.setOwner", json!({"layer": a.0, "page": page})).unwrap();
+    s.execute("multipage.page.setOwner", json!({"layer": b.0, "page": page})).unwrap();
+    set_selection(&mut s, vec![a, b], Some(b), Some(a)).unwrap();
+
+    s.execute("layer.align.horizontalCenters", json!({"to": "page", "page": page})).unwrap();
+    s.execute("layer.align.verticalCenters", json!({"to": "page", "page": page})).unwrap();
+    assert_eq!(bounds(&s, a), Rect::new(75, 65, 85, 75));
+    assert_eq!(bounds(&s, b), Rect::new(95, 65, 105, 75));
+
+    s.execute("edit.undo", json!({})).unwrap();
+    s.execute("edit.undo", json!({})).unwrap();
+    assert_eq!(bounds(&s, a), Rect::new(5, 5, 15, 15));
+    assert_eq!(bounds(&s, b), Rect::new(25, 5, 35, 15));
+
+    // A page alignment may not silently move an unrelated loose object.
+    s.execute("multipage.page.setOwner", json!({"layer": b.0, "page": null})).unwrap();
+    assert!(s.execute("layer.align.horizontalCenters", json!({"to": "page", "page": page})).is_err());
+    assert_eq!(bounds(&s, a), Rect::new(5, 5, 15, 15));
+    assert_eq!(bounds(&s, b), Rect::new(25, 5, 35, 15));
+}

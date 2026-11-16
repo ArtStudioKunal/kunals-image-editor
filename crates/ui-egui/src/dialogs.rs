@@ -746,12 +746,14 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
 pub const ABOUT_TABS: [&str; 1] = ["about"];
 
 /// The About tab to show: the `tab` field when it names one, otherwise "about".
+#[allow(dead_code)]
 fn about_tab(fields: &serde_json::Map<String, Value>) -> &'static str {
     let want = fields.get("tab").and_then(Value::as_str).unwrap_or("");
     ABOUT_TABS.iter().copied().find(|t| *t == want).unwrap_or("about")
 }
 
 /// One About tab's contents: the credits lists, or the product blurb and links.
+#[allow(dead_code)]
 fn about_tab_body(app: &mut PhotocraftApp, ui: &mut egui::Ui, tab: &str) {
     match tab {
         "contributors" => crate::credits::contributors_ui(app, ui),

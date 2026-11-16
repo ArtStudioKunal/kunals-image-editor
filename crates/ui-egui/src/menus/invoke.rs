@@ -38,6 +38,21 @@ pub(super) fn workspace_name(id: &str) -> Option<&'static str> {
     })
 }
 
+/// Multipage's own clipboard preserves native layer positions when both sides are
+/// KimagePro documents. External clipboard images still use ordinary centered Paste.
+fn multipage_native_paste(workspace: &str, external: bool, has_document: bool) -> bool {
+    workspace == "Multipage" && !external && has_document
+}
+
+#[cfg(test)]
+#[test]
+fn multipage_native_paste_only_for_internal_document_clipboard() {
+    assert!(multipage_native_paste("Multipage", false, true));
+    assert!(!multipage_native_paste("Essentials", false, true));
+    assert!(!multipage_native_paste("Multipage", true, true));
+    assert!(!multipage_native_paste("Multipage", false, false));
+}
+
 /// Run a command id from any source (menu, shortcut, palette, automation).
 pub fn invoke(app: &mut PhotocraftApp, ctx: &egui::Context, id: &str, params: Value) -> Result<Value, String> {
     if app.automation_input
@@ -426,12 +441,20 @@ pub(crate) fn invoke_unguarded(app: &mut PhotocraftApp, ctx: &egui::Context, id:
         "select.transformSelection" if params.as_object().is_none_or(|o| o.is_empty()) => {
             crate::transform_tool::begin_selection(app, ctx).map(|_| json!({"transform": app.ui.transform}))
         }
+        // CorelDRAW-style Multipage Copy keeps the editable source layer tree, even
+        // for raster layers; selection/mask-specific commands retain their behavior.
+        "edit.copy" if app.ui.workspace == "Multipage" && params.as_object().is_none_or(|o| o.is_empty()) => {
+            app.run("edit.copy", json!({"preserveLayers": true}))
+        }
         "edit.paste" if params.as_object().is_none_or(|o| o.is_empty()) => {
             // Photoshop: paste in place when the copied area is visible, else centred in the view;
             // images from other apps are always centred.
             app.import_os_clipboard()?;
             app.clip_read_for_paste = true;
             let external = app.clip_external;
+            if multipage_native_paste(&app.ui.workspace, external, app.session.active().is_some()) {
+                return app.run("edit.pasteSpecial.pasteInPlace", json!({}));
+            }
             let visible = !external
                 && app.session.active_index().zip(app.session.clipboard.as_ref()).is_some_and(|(i, clip)| {
                     let v = &app.ui.views[i];
@@ -788,6 +811,9 @@ pub fn apply_workspace(app: &mut PhotocraftApp) {
         // Color includes Swatches; Navigator keeps the pixel canvas easy to inspect.
         "Pixel Art" => (true, true, true, false, false),
         "Motion" => (false, false, true, false, true),
+        // Multipage starts with a layout-oriented panel arrangement; document pages
+        // and page-aware tools will be introduced as separate, tested milestones.
+        "Multipage" => (false, false, true, false, true),
         _ => (false, true, true, false, true),
     };
     p.navigator = nav;
@@ -795,7 +821,7 @@ pub fn apply_workspace(app: &mut PhotocraftApp) {
     p.layers = layers;
     p.history = history;
     p.properties = props;
-    p.character = app.ui.workspace == "Graphic and Web";
+    p.character = matches!(app.ui.workspace.as_str(), "Graphic and Web" | "Multipage");
     // Timeline is a floating panel, not a dock group. Showing it does not create or edit
     // a document timeline; changing away from Motion closes it just like its Close button.
     app.ui.timeline.open = app.ui.workspace == "Motion";

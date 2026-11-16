@@ -90,7 +90,7 @@ pub fn specs() -> Vec<CommandSpec> {
             CommandSpec { id: $id, label: $label, menu: $menu, shortcut: $sc, params: $params, enabled: $enabled, journal: true, run: $run }
         };
     }
-    const ALIGN: &str = r##"{"to":"auto|layers|selection|canvas"="auto"} (auto: the active selection's bounds when there is one, however many layers are selected; else one layer aligns to the canvas and several to their combined bounds)"##;
+    const ALIGN: &str = r##"{"to":"auto|layers|selection|canvas|page"="auto","page":id?} (auto: selection or layer/canvas bounds; page: Multipage page id, preserving relative positions of selected objects)"##;
     vec![
         spec!("select.allLayers", "All Layers", &["Select"], Some("Cmd+Alt+A"), "{}", has_doc, |s, _| select_all_layers(s)),
         spec!("select.deselectLayers", "Deselect Layers", &["Select"], None, "{}", has_doc, |s, _| {

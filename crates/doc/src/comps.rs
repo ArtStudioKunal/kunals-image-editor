@@ -149,6 +149,20 @@ impl ArtboardBackground {
     }
 }
 
+/// Print/layout settings attached to an individual Multipage page. Insets are in
+/// native document pixels, ordered [top, right, bottom, left]. This is independent
+/// of the page's position on the larger artboard/pasteboard canvas.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct PageLayout {
+    pub margins: [u32; 4],
+    pub bleed: [u32; 4],
+    /// Loose top-level layers explicitly associated with this page. Association does
+    /// not reparent or clip them; they remain editable anywhere on the pasteboard.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub owned_layers: Vec<LayerId>,
+}
+
 /// An artboard: a top-level group that clips its children to `rect` and paints `background`
 /// behind them (Layer › New › Artboard).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -159,11 +173,14 @@ pub struct Artboard {
     /// Size preset the board was made from ("" = custom).
     #[serde(default)]
     pub preset: String,
+    /// Only populated for Multipage pages; legacy artboards remain unchanged.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub page: Option<PageLayout>,
 }
 
 impl Artboard {
     pub fn new(rect: Rect) -> Self {
-        Self { rect, background: ArtboardBackground::White, preset: String::new() }
+        Self { rect, background: ArtboardBackground::White, preset: String::new(), page: None }
     }
 }
 
@@ -264,6 +281,20 @@ mod tests {
         let gone = d.layers[1].id;
         d.layers.pop();
         assert_eq!(d.layer_comps[0].missing_layers(&d), vec![gone]);
+    }
+
+    #[test]
+    fn multipage_layout_json_is_backward_compatible_with_legacy_artboards() {
+        let legacy = Artboard::new(Rect::new(0, 0, 100, 80));
+        let encoded = serde_json::to_value(&legacy).unwrap();
+        assert!(encoded.get("page").is_none(), "legacy artboards should not gain new metadata");
+        let decoded: Artboard = serde_json::from_value(encoded).unwrap();
+        assert_eq!(decoded, legacy);
+
+        let page = Artboard { page: Some(PageLayout { margins: [3, 4, 5, 6], bleed: [2; 4], owned_layers: Vec::new() }), ..legacy };
+        let saved = serde_json::to_value(&page).unwrap();
+        let restored: Artboard = serde_json::from_value(saved).unwrap();
+        assert_eq!(restored, page);
     }
 
     #[test]

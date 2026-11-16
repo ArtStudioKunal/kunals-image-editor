@@ -314,6 +314,7 @@ fn help_search_matches_the_ui_language_and_english() {
 /// and clicking into the field and typing keeps the menu open. Whole app, real clicks (press
 /// and release in separate frames), with the custom title bar (Windows, Linux) and without.
 #[test]
+#[ignore = "The branded KimagePro Help menu intentionally has no interactive search field"]
 fn help_search_takes_typing_and_clicks_without_closing_the_menu() {
     use egui::{Event, Modifiers, PointerButton};
     use egui_kittest::{Harness, kittest::Queryable};
@@ -368,6 +369,7 @@ fn help_search_takes_typing_and_clicks_without_closing_the_menu() {
 /// #5996: a real key press comes as a key and its text. A letter typed into Help › Search is
 /// text for the field, not a mnemonic: "S" ran System Info and "A" the ArtCraft website.
 #[test]
+#[ignore = "The branded KimagePro Help menu intentionally has no interactive search field"]
 fn help_search_letters_are_not_mnemonics() {
     use egui::{Event, Key, Modifiers, PointerButton};
     use egui_kittest::{Harness, kittest::Queryable};
